@@ -18,7 +18,7 @@ Architektur, Business-Regeln und Sicherheitsleitplanken: siehe
 Optional, aber fuer die vollen Faehigkeiten empfohlen:
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Speech-to-Text)
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) (lokales LLM, `llama-server`)
-- [Piper](https://github.com/rhasspy/piper) (Text-to-Speech, deutsche maennliche Stimme)
+- [Chatterbox Multilingual](https://github.com/resemble-ai/chatterbox) (Text-to-Speech, Standard - natuerliche deutsche maennliche Stimme) oder [Piper](https://github.com/rhasspy/piper) (schnellere Alternative)
 - [Asterisk](https://www.asterisk.org/) mit ARI (fuer echte Telefonanrufe)
 
 Alle diese Schritte werden von `scripts/setup_mac.sh` interaktiv unterstuetzt.
@@ -94,17 +94,47 @@ siehe `agent/conversation.py::_llm_or_fallback`).
 brew install whisper-cpp   # stellt z.B. `whisper-cli` bereit
 ```
 
-Deutsches Modell herunterladen (z.B. `ggml-medium.bin`) nach
-`models/whisper/`. `.env`: `WHISPER_MODEL_PATH=./models/whisper/ggml-medium.bin`.
+Mehrsprachiges Modell herunterladen (Standard: `ggml-small.bin`, guter
+Kompromiss aus Tempo/Genauigkeit fuer Deutsch) nach `models/whisper/`:
+
+```bash
+curl -L -o models/whisper/ggml-small.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+```
+
+`.env`: `WHISPER_MODEL_PATH=./models/whisper/ggml-small.bin`. Fuer hoehere
+Genauigkeit (langsamer) alternativ `ggml-medium.bin`.
 
 ## 7. TTS installieren
 
+Dario nutzt aktuell standardmaessig **Chatterbox Multilingual** (natuerlicher,
+aber deutlich langsamer als Piper - Ergebnis mehrerer Stimm-Vergleichsrunden,
+siehe `voice/tts/chatterbox_tts.py`). Piper bleibt als schnellere Alternative
+verfuegbar.
+
+**Chatterbox (Standard, `TTS_PROVIDER=chatterbox`):**
+
 ```bash
-pip install piper-tts
+pip install -e ".[chatterbox]"   # ~2GB, zieht PyTorch + transformers nach
 ```
 
-Deutsche maennliche Stimme (empfohlen: `de_DE-thorsten-medium`) nach
-`models/piper/` herunterladen. `.env`: `PIPER_MODEL_PATH=./models/piper/de_DE-thorsten-medium.onnx`.
+Optional eine eigene Referenzstimme klonen: WAV-Datei (>= 5s, sauberer
+Einzelsprecher) nach `models/voice_reference/dario_reference.wav` legen und in
+`.env` `CHATTERBOX_REFERENCE_AUDIO_PATH=./models/voice_reference/dario_reference.wav`
+setzen. Wer diese Datei bereitstellt, muss die Rechte an der Stimme haben.
+Ohne Referenz nutzt Chatterbox seine eingebaute Standardstimme. Laeuft bewusst
+auf CPU (`CHATTERBOX_DEVICE=cpu`) - Apple-Silicon-MPS ist mit Chatterbox
+aktuell inkompatibel. Modellgewichte laden beim ersten Start automatisch von
+Hugging Face (~2GB).
+
+**Piper (Alternative, `TTS_PROVIDER=local_piper`):**
+
+```bash
+pip install -e ".[voice]"   # enthaelt piper-tts
+```
+
+Deutsche maennliche Stimme (empfohlen: `de_DE-thorsten-high`) nach
+`models/piper/` herunterladen. `.env`: `PIPER_MODEL_PATH=./models/piper/de_DE-thorsten-high.onnx`.
 
 ## 8. Text-Test starten
 
@@ -122,16 +152,20 @@ Online-Auftritt). Eingabe `exit` beendet den Test manuell.
 
 ## 9. Voice-Test starten
 
-Benoetigt whisper.cpp + Piper (Schritte 6+7) sowie die `voice`-Extras
-(`pip install -e ".[voice]"`, bereits Teil von `setup_mac.sh`):
+Benoetigt whisper.cpp (Schritt 6), die `voice`-Extras (`pip install -e ".[voice]"`,
+bereits Teil von `setup_mac.sh`) sowie den in `TTS_PROVIDER` gewaehlten
+TTS-Provider aus Schritt 7 (Standard: Chatterbox, Extra `chatterbox`):
 
 ```bash
 python -m app.local_voice_test --entwurf --geprueft
 ```
 
 Ablauf: Mac-Mikrofon -> whisper.cpp -> Dario Conversation Engine -> LLM ->
-Piper -> Mac-Lautsprecher. Aufnahme endet automatisch bei erkannter Stille
-(VAD, `voice/vad.py`).
+TTS-Provider -> Mac-Lautsprecher. Aufnahme endet automatisch bei erkannter
+Stille (VAD, `voice/vad.py`). Mit Chatterbox dauert das erste Modell-Laden
+ca. 10-15s, danach jede Antwort auf CPU nochmal ca. 25-30s Generierungszeit -
+fuer diesen Test in Ordnung, aber (noch) nicht telefonietauglich (siehe
+CLAUDE.md "Grenzen der aktuellen Version").
 
 ## 10. Dashboard oeffnen
 
@@ -228,7 +262,9 @@ vorgetaeuscht.
 | `python -m app.chat_test` bricht mit Importfehler ab | venv nicht aktiviert / Abhaengigkeiten fehlen | `source .venv/bin/activate && pip install -e ".[dev,voice]"` |
 | `LocalLlamaProvider nicht erreichbar` im Log | `llama-server` laeuft nicht | Schritt 5 wiederholen, oder Template-Fallback akzeptieren |
 | `WhisperBinaryNotFoundError` | `whisper-cli` nicht im PATH oder Modell fehlt | Schritt 6, `.env` Pfade pruefen |
-| `PiperBinaryNotFoundError` | Piper nicht installiert oder Modell fehlt | Schritt 7 |
+| `PiperBinaryNotFoundError` | Piper nicht installiert oder Modell fehlt (nur bei `TTS_PROVIDER=local_piper`) | Schritt 7 |
+| `ChatterboxUnavailableError` | Paket `chatterbox-tts` nicht installiert oder `CHATTERBOX_REFERENCE_AUDIO_PATH` zeigt auf fehlende Datei | `pip install -e ".[chatterbox]"`, `.env` Pfad pruefen |
+| `local_voice_test` dauert beim ersten Satz sehr lange | Chatterbox laedt Modellgewichte + generiert auf CPU (~25-30s/Aeusserung normal) | Kein Fehler - siehe CLAUDE.md "Grenzen der aktuellen Version"; fuer schnellere Antworten `TTS_PROVIDER=local_piper` setzen |
 | `502` bei `POST /api/calls` | Asterisk/ARI nicht erreichbar | Schritt 11-13 pruefen, `asterisk -rx "core show version"` |
 | E-Mail wird nie als "gesendet" bestaetigt | SMTP-Zugangsdaten fehlen/falsch (`.env`) | `SMTP_*` Variablen pruefen; das ist bewusstes Verhalten (kein falscher Versand-Claim) |
 | `pytest` findet `webrtcvad`-Importfehler | `pkg_resources` fehlt (neue `setuptools`-Version) | `pip install -e ".[voice]"` installiert automatisch `setuptools<81` |

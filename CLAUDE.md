@@ -148,13 +148,26 @@ ruff check .                        # Linting
 ```bash
 source .venv/bin/activate
 python -m app.chat_test             # Text-Test (kein Telefon/Audio noetig)
-python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + Piper)
+python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + TTS-Provider)
 uvicorn app.main:app --reload       # API + Dashboard (http://127.0.0.1:8000)
 python -m scripts.import_leads_csv --file leads.csv
 ```
 
-Ausfuehrliche Setup-Schritte (Python, whisper.cpp, llama.cpp, Piper,
+Ausfuehrliche Setup-Schritte (Python, whisper.cpp, llama.cpp, Piper/Chatterbox,
 Asterisk/PJSIP): siehe `README.md` und `scripts/setup_mac.sh`.
+
+## Darios Stimme (Stand: entschieden, siehe `voice/tts/chatterbox_tts.py`)
+
+Nach mehreren Vergleichsrunden (Piper klang zu hoch/kehlig/kuenstlich) ist
+`TTS_PROVIDER=chatterbox` der aktuelle Standard: Chatterbox Multilingual
+(Resemble AI, MIT-Lizenz), Stimme geklont aus einer lokalen Referenzaufnahme
+(`CHATTERBOX_REFERENCE_AUDIO_PATH`, lokal unter `models/voice_reference/`,
+nicht im Repo), mit ruhig abgestimmten Parametern
+(`exaggeration=0.22, cfg_weight=0.35, temperature=0.55`). Diese Werte nicht
+ohne Grund aendern - sie sind das Ergebnis expliziter Nutzerentscheidung nach
+Hoervergleichen, nicht Defaults. `voice/tts/piper_tts.py` bleibt als
+schnellere, aber synthetischer klingende Alternative bestehen
+(`TTS_PROVIDER=local_piper`).
 
 ## Grenzen der aktuellen Version (ehrlich dokumentiert)
 
@@ -170,9 +183,16 @@ Asterisk/PJSIP): siehe `README.md` und `scripts/setup_mac.sh`.
 - Inbound-Telefonie (Dialplan-Vorlage in `phone/sip.py::render_extensions_conf`
   vorhanden) ist noch nicht an den Call Controller angebunden - aktueller
   Fokus liegt auf Outbound.
-- Ohne konfigurierten Asterisk/whisper.cpp/llama.cpp/Piper laufen
+- Ohne konfigurierten Asterisk/whisper.cpp/llama.cpp/TTS-Provider laufen
   `app.chat_test` (Text) vollstaendig lokal ohne externe Abhaengigkeiten;
   `app.local_voice_test`, echte Anrufe und `POST /api/calls` benoetigen die
   jeweiligen lokalen Binaries/Server und melden bei deren Fehlen einen
   klaren, echten Fehler (kein stiller Fallback, keine vorgetaeuschte
   Funktion).
+- **Chatterbox-Latenz noch nicht telefonietauglich**: auf diesem Mac (CPU-only,
+  Apple-Silicon-MPS derzeit inkompatibel mit Chatterbox) dauert eine einzelne
+  Aeusserung ca. 25-30s reine Generierungszeit nach dem Laden. Fuer
+  `local_voice_test` akzeptabel, fuer ein fluessiges Telefongespraech noch zu
+  langsam - vor einer echten Asterisk-Anbindung muss das adressiert werden
+  (z.B. GPU-Beschleunigung, kleineres/schnelleres Modell oder Piper als
+  Fallback fuer den Live-Pfad).

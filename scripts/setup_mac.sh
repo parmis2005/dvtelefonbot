@@ -117,14 +117,39 @@ EOF
     fi
 fi
 
-# --- Piper (TTS) ------------------------------------------------------------
+# --- Chatterbox (TTS, Standard) ---------------------------------------------
+# Aktueller Standard-TTS-Provider (TTS_PROVIDER=chatterbox in .env.example) -
+# natuerlichere Stimme als Piper, aber schwerer (~2GB, PyTorch) und auf CPU
+# spuerbar langsamer. Eigenes Extra, daher hier explizit mit Rueckfrage.
+if python3 -c "import chatterbox" >/dev/null 2>&1; then
+    info "Chatterbox (chatterbox-tts) gefunden."
+else
+    warn "Chatterbox nicht gefunden (Standard-TTS-Provider, ~2GB Download)."
+    if confirm "Jetzt installieren (pip install -e \".[chatterbox]\")?"; then
+        pip install -e ".[chatterbox]"
+        info "Chatterbox installiert. Modellgewichte laden beim ersten Start automatisch (~2GB)."
+    else
+        echo "   Spaeter nachholen: pip install -e \".[chatterbox]\""
+        echo "   Oder TTS_PROVIDER=local_piper in .env setzen (siehe naechster Block)."
+    fi
+fi
+
+mkdir -p "$PROJECT_ROOT/models/voice_reference"
+if [ ! -f "$PROJECT_ROOT/models/voice_reference/dario_reference.wav" ]; then
+    echo "   Optional: eigene Referenzstimme (WAV, >= 5s, ein Sprecher, eigene Rechte"
+    echo "   erforderlich) nach models/voice_reference/dario_reference.wav legen und"
+    echo "   CHATTERBOX_REFERENCE_AUDIO_PATH in .env setzen. Ohne Referenz nutzt"
+    echo "   Chatterbox seine eingebaute Standardstimme."
+fi
+
+# --- Piper (TTS, schnellere Alternative) -------------------------------------
 # `piper-tts` ist Teil der "voice"-Extras (pyproject.toml) und wurde damit
 # bereits oben zusammen mit den Python-Abhaengigkeiten installiert. Dieser
 # Block ist ein Fallback, falls nur die Basis-Abhaengigkeiten installiert wurden.
 if command -v piper >/dev/null 2>&1; then
     info "Piper gefunden."
 else
-    warn "Piper (lokale TTS) nicht gefunden."
+    warn "Piper (schnellere, aber synthetischer klingende TTS-Alternative) nicht gefunden."
     if confirm "Jetzt via pip installieren (pip install piper-tts)?"; then
         pip install piper-tts
     else
@@ -135,7 +160,7 @@ fi
 mkdir -p "$PROJECT_ROOT/models/piper"
 if [ ! -f "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx" ]; then
     warn "Kein Piper-Sprachmodell in models/piper/ gefunden."
-    if confirm "Empfohlene deutsche maennliche Stimme de_DE-thorsten-high (natuerlichste Qualitaet, ~114MB) jetzt herunterladen?"; then
+    if confirm "Deutsche maennliche Stimme de_DE-thorsten-high (~114MB) jetzt herunterladen?"; then
         BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high"
         curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx" "$BASE_URL/de_DE-thorsten-high.onnx"
         curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx.json" "$BASE_URL/de_DE-thorsten-high.onnx.json"
