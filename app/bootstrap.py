@@ -14,6 +14,7 @@ from llm.local_llama import LocalLlamaProvider
 from tools.base import EmailProvider, WhatsAppProvider
 from tools.email import SMTPEmailProvider
 from tools.whatsapp import build_provider as build_whatsapp_provider
+from voice.tts.base import TextToSpeechProvider
 
 
 @dataclass
@@ -53,6 +54,26 @@ def build_whatsapp_provider_from_settings(settings: Settings) -> WhatsAppProvide
     return build_whatsapp_provider(
         settings.whatsapp_api_url, settings.whatsapp_api_token, settings.whatsapp_phone_number_id
     )
+
+
+def build_tts_provider(settings: Settings) -> TextToSpeechProvider:
+    if settings.tts_provider == "local_piper":
+        from voice.tts.piper_tts import LocalTTSProvider
+
+        return LocalTTSProvider(settings.piper_binary, settings.piper_model_path, settings.piper_speaker)
+    if settings.tts_provider == "chatterbox":
+        from voice.tts.chatterbox_tts import ChatterboxTTSProvider
+
+        return ChatterboxTTSProvider(
+            language=settings.chatterbox_language,
+            exaggeration=settings.chatterbox_exaggeration,
+            cfg_weight=settings.chatterbox_cfg_weight,
+            temperature=settings.chatterbox_temperature,
+            device=settings.chatterbox_device,
+            max_attempts=settings.chatterbox_max_attempts,
+            reference_audio_path=settings.chatterbox_reference_audio_path or None,
+        )
+    raise ValueError(f"Unbekannter TTS_PROVIDER: {settings.tts_provider}")
 
 
 def build_app_context() -> AppContext:

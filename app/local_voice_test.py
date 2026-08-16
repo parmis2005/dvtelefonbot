@@ -4,7 +4,8 @@ Nutzt exakt dieselbe Conversation Engine wie chat_test.py und der spaetere
 Telefonie-Pfad. Erfordert:
   - installierte Voice-Extras: pip install -e ".[voice]"
   - ein lokales whisper.cpp Binary + Modell (WHISPER_*)
-  - ein lokales Piper Binary + Modell (PIPER_*)
+  - einen TTS-Provider gemaess TTS_PROVIDER in .env (local_piper oder
+    chatterbox - siehe app/bootstrap.py::build_tts_provider)
 
 Aufruf:
     python -m app.local_voice_test
@@ -18,13 +19,13 @@ import tempfile
 from pathlib import Path
 
 from agent.dario import Dario
-from app.bootstrap import build_app_context
+from app.bootstrap import build_app_context, build_tts_provider
 from core.logging import get_logger
 from database.database import get_session_factory, init_db
 from database.repository import LeadRepository
 from tools.call_tools import ToolExecutor
 from voice.stt.whisper_cpp import LocalWhisperProvider
-from voice.tts.piper_tts import LocalTTSProvider
+from voice.tts.base import TextToSpeechProvider
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,7 @@ async def run_voice_test(args: argparse.Namespace) -> None:
     settings = ctx.settings
 
     stt = LocalWhisperProvider(settings.whisper_cpp_binary, settings.whisper_model_path, settings.whisper_language)
-    tts = LocalTTSProvider(settings.piper_binary, settings.piper_model_path, settings.piper_speaker)
+    tts = build_tts_provider(settings)
 
     if not await stt.is_available():
         raise SystemExit(
@@ -62,8 +63,8 @@ async def run_voice_test(args: argparse.Namespace) -> None:
         )
     if not await tts.is_available():
         raise SystemExit(
-            f"Piper nicht verfuegbar (Binary '{settings.piper_binary}' oder Modell "
-            f"'{settings.piper_model_path}' fehlt). Siehe scripts/setup_mac.sh / README.md."
+            f"TTS-Provider '{settings.tts_provider}' nicht verfuegbar (fehlendes Binary/Modell "
+            f"oder Python-Paket). Siehe scripts/setup_mac.sh / README.md."
         )
 
     session_factory = get_session_factory()
@@ -108,7 +109,7 @@ async def run_voice_test(args: argparse.Namespace) -> None:
                 break
 
 
-async def _speak(tts: LocalTTSProvider, text: str) -> None:
+async def _speak(tts: TextToSpeechProvider, text: str) -> None:
     from voice.audio_stream import play_wav
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

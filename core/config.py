@@ -54,13 +54,25 @@ class Settings(BaseSettings):
 
     # Whisper
     whisper_cpp_binary: str = "whisper-cli"
-    whisper_model_path: str = "./models/whisper/ggml-medium.bin"
+    whisper_model_path: str = "./models/whisper/ggml-small.bin"
     whisper_language: str = "de"
 
-    # TTS
+    # TTS (Piper)
     piper_binary: str = "piper"
-    piper_model_path: str = "./models/piper/de_DE-thorsten-medium.onnx"
+    piper_model_path: str = "./models/piper/de_DE-thorsten-high.onnx"
     piper_speaker: str | None = None
+
+    # TTS (Chatterbox Multilingual) - siehe voice/tts/chatterbox_tts.py fuer den
+    # Hintergrund zu diesen Werten (Ergebnis einer mehrstufigen Stimmauswahl).
+    chatterbox_language: str = "de"
+    chatterbox_exaggeration: float = 0.22
+    chatterbox_cfg_weight: float = 0.35
+    chatterbox_temperature: float = 0.55
+    chatterbox_device: str = "cpu"
+    chatterbox_max_attempts: int = 3
+    # Leer = Chatterbox' eingebaute Standardstimme. Gesetzt = Stimme wird aus
+    # dieser Referenzaufnahme geklont (siehe voice/tts/chatterbox_tts.py).
+    chatterbox_reference_audio_path: str = ""
 
     # Asterisk / ARI
     asterisk_ari_url: str = "http://127.0.0.1:8088"

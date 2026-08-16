@@ -34,6 +34,12 @@ voice = [
     "setuptools<81",
     "piper-tts>=1.2",  # liefert das `piper` CLI-Binary fuer LocalTTSProvider
 ]
+chatterbox = [
+    # Natuerlichere, aber schwerere lokale Stimme (Resemble AI, MIT-Lizenz).
+    # Zieht PyTorch + transformers nach (~2GB) - eigenes Extra statt Teil von
+    # "voice", damit ein schlanker Piper-only-Setup moeglich bleibt.
+    "chatterbox-tts>=0.1.7",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
