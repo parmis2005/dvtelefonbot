@@ -1,0 +1,33 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# runtime data - never commit real leads/calls/secrets
+data/*.db
+data/*.sqlite3
+logs/*.log
+transcripts/*.json
+transcripts/*.txt
+
+# keep folder structure
+!data/.gitkeep
+!logs/.gitkeep
+!transcripts/.gitkeep
+
+# models (large binaries, downloaded by setup script)
+models/
+*.gguf
+*.bin
+*.onnx
+
+.DS_Store
+.idea/
+.vscode/

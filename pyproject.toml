@@ -1,0 +1,64 @@
+[project]
+name = "digital-vision-dario"
+version = "0.1.0"
+description = "Dario - KI-Telefonagent fuer Digital Vision Moenchengladbach"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    "aiosmtplib>=3.0",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+    "structlog>=24.4",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "aiohttp>=3.10",
+    "websockets>=13.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+voice = [
+    "sounddevice>=0.4.7",
+    "soundfile>=0.12",
+    "webrtcvad>=2.0.10",
+    # webrtcvad (unmaintained) imports pkg_resources at module load time;
+    # setuptools >=81 removed it. Pin until webrtcvad is replaced/patched.
+    "setuptools<81",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["agent", "api", "core", "database", "llm", "phone", "services", "tools", "voice"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    "DTZ003",  # datetime.utcnow(): bewusst konsistent naiv-UTC im gesamten Projekt verwendet
+    "DTZ005",
+    "BLE001",  # bewusste breite except-Klauseln an wenigen, dokumentierten Stellen (Filter/Import)
+    "PYI034",  # __aenter__ Rueckgabetyp: kosmetisch, `Self` nicht kritisch
+    "ASYNC230",  # kurzlebiges CLI-Skript, kein Event-Loop-Blocking-Risiko in der Praxis
+]

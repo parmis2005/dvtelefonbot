@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ lead.unternehmen if lead else "Lead nicht gefunden" }} - Dario Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <a href="/" class="back">&larr; Zurueck</a>
+    <h1>{{ lead.unternehmen if lead else "Lead nicht gefunden" }}</h1>
+  </header>
+
+  <main>
+    {% if not lead %}
+      <p>Dieser Lead existiert nicht.</p>
+    {% else %}
+    <section class="grid">
+      <div class="card">
+        <h2>Kontaktdaten</h2>
+        <dl>
+          <dt>Ansprechpartner</dt><dd>{{ lead.ansprechpartner or "-" }}</dd>
+          <dt>Branche</dt><dd>{{ lead.branche or "-" }}</dd>
+          <dt>Telefonnummer</dt><dd>{{ lead.telefonnummer }}</dd>
+          <dt>E-Mail</dt><dd>{{ lead.email or "-" }}</dd>
+          <dt>Website</dt><dd>{{ lead.website_url or "-" }}</dd>
+          <dt>Status</dt><dd><span class="badge status-{{ lead.status.value | lower }}">{{ lead.status.value }}</span></dd>
+          <dt>Bevorzugter Kontaktweg</dt><dd>{{ lead.preferred_contact.value }}</dd>
+          <dt>Rueckrufwunsch</dt><dd>{{ lead.callback_note or "-" }}</dd>
+          <dt>Do-Not-Call</dt><dd>{{ "Ja" if lead.do_not_call else "Nein" }}</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h2>Notizen</h2>
+        <p>{{ lead.notizen or "keine" }}</p>
+        <h2>Entwurf</h2>
+        <p>{{ "vorhanden: " ~ lead.entwurf_link if lead.entwurf_vorhanden else "kein Entwurf hinterlegt" }}</p>
+        <h2>Online-Auftritt geprueft</h2>
+        <p>{{ "Ja" if lead.online_auftritt_geprueft else "Nein" }}</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Call-Historie</h2>
+      {% for call in calls %}
+      <div class="card call-card">
+        <div class="call-meta">
+          <strong>Call #{{ call.id }}</strong>
+          <span class="badge">{{ call.status.value }}</span>
+          {% if call.result %}<span class="badge">{{ call.result.value if call.result.value is defined else call.result }}</span>{% endif %}
+          <span>{{ call.started_at.strftime("%d.%m.%Y %H:%M") if call.started_at else "-" }}</span>
+          <span>{{ call.duration ~ "s" if call.duration else "" }}</span>
+        </div>
+        {% if call.summary %}
+        <details open>
+          <summary>Zusammenfassung</summary>
+          <pre>{{ call.summary }}</pre>
+        </details>
+        {% endif %}
+        {% if call.transcript %}
+        <details>
+          <summary>Transkript</summary>
+          <pre>{{ call.transcript }}</pre>
+        </details>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="empty">Noch keine Anrufe.</p>
+      {% endfor %}
+    </section>
+    {% endif %}
+  </main>
+</body>
+</html>

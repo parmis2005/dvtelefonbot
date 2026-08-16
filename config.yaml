@@ -1,0 +1,33 @@
+# Digital Vision Dario - statische Konfiguration
+# Werte, die sich selten aendern und keine Secrets sind.
+# Secrets/Umgebungsspezifisches kommt in .env (siehe .env.example).
+
+company:
+  name: "Digital Vision"
+  location: "Moenchengladbach"
+  agent_name: "Dario"
+
+pricing:
+  website_monthly_from: 300
+  website_currency: "EUR"
+  maintenance_monthly_from: 100
+  seo_monthly_from: 200
+  admin_systems_note: "individuell geplant und auf Anfrage kalkuliert"
+
+conversation:
+  max_rejections: 2
+  wait_timeout_seconds: 25
+  silence_timeout_seconds: 8
+  still_there_prompt_after_seconds: 20
+
+call:
+  cooldown_seconds: 86400
+  max_call_duration_seconds: 900
+
+services:
+  - "moderne Webseiten"
+  - "professionelle Webseiten"
+  - "SEO-Loesungen"
+  - "Verwaltungssysteme"
+  - "Dashboards"
+  - "individuelle digitale Loesungen"

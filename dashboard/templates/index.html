@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Digital Vision Dario - Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Digital Vision Dario</h1>
+    <p class="subtitle">Lead- und Anruf-Uebersicht</p>
+  </header>
+
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>Unternehmen</th>
+          <th>Ansprechpartner</th>
+          <th>Telefonnummer</th>
+          <th>Status</th>
+          <th>Letzter Anruf</th>
+          <th>Dauer</th>
+          <th>Entwurf</th>
+          <th>Do-Not-Call</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><a href="/leads/{{ row.lead.id }}">{{ row.lead.unternehmen }}</a></td>
+          <td>{{ row.lead.ansprechpartner or "-" }}</td>
+          <td>{{ row.lead.telefonnummer }}</td>
+          <td><span class="badge status-{{ row.lead.status.value | lower }}">{{ row.lead.status.value }}</span></td>
+          <td>
+            {% if row.last_call %}
+              {{ row.last_call.started_at.strftime("%d.%m.%Y %H:%M") if row.last_call.started_at else "-" }}
+            {% else %}
+              noch nicht angerufen
+            {% endif %}
+          </td>
+          <td>{{ row.last_call.duration ~ "s" if row.last_call and row.last_call.duration else "-" }}</td>
+          <td>{{ "vorhanden" if row.lead.entwurf_vorhanden else "-" }}</td>
+          <td>{{ "🚫" if row.lead.do_not_call else "" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">Noch keine Leads vorhanden. Import per CSV: scripts/import_leads_csv.py</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
