@@ -80,13 +80,17 @@ async def run_voice_test(args: argparse.Namespace) -> None:
         print(f"\nDario: {opening}")
         await _speak(tts, opening)
 
+        # Turn-Ende-Erkennung (wie lange Stille bedeutet "Nutzer ist fertig")
+        # ist bewusst kurz und fix (siehe voice/vad.py::EndpointConfig-Default),
+        # unabhaengig von SILENCE_TIMEOUT - das steuert im Telefonie-Pfad etwas
+        # anderes (wann "Sind Sie noch da?" gefragt wird, nicht die Turn-Segmentierung).
+        TURN_SILENCE_MS = 900
+
         while dario.call_active:
             print("\n[Hoere zu ... sprechen Sie jetzt]")
             from voice.audio_stream import record_until_silence
 
-            wav_path = await record_until_silence(
-                max_seconds=20, silence_timeout_ms=settings.silence_timeout * 1000 // 8
-            )
+            wav_path = await record_until_silence(max_seconds=20, silence_timeout_ms=TURN_SILENCE_MS)
             transcription = await stt.transcribe(wav_path)
             Path(wav_path).unlink(missing_ok=True)
 

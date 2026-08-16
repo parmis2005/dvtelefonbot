@@ -32,6 +32,7 @@ voice = [
     # webrtcvad (unmaintained) imports pkg_resources at module load time;
     # setuptools >=81 removed it. Pin until webrtcvad is replaced/patched.
     "setuptools<81",
+    "piper-tts>=1.2",  # liefert das `piper` CLI-Binary fuer LocalTTSProvider
 ]
 dev = [
     "pytest>=8.3",

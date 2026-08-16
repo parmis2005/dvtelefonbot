@@ -88,12 +88,14 @@ EOF
 fi
 
 mkdir -p "$PROJECT_ROOT/models/whisper"
-if [ ! -f "$PROJECT_ROOT/models/whisper/ggml-medium.bin" ]; then
+if [ ! -f "$PROJECT_ROOT/models/whisper/ggml-small.bin" ]; then
     warn "Kein Whisper-Modell in models/whisper/ gefunden."
-    if confirm "Deutsches Whisper-Modell (medium, ~1.5GB) jetzt herunterladen?"; then
-        curl -L -o "$PROJECT_ROOT/models/whisper/ggml-medium.bin" \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+    if confirm "Mehrsprachiges Whisper-Modell (small, ~488MB, guter Kompromiss aus Geschwindigkeit/Genauigkeit fuer Deutsch) jetzt herunterladen?"; then
+        curl -L -o "$PROJECT_ROOT/models/whisper/ggml-small.bin" \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
     fi
+    echo "   Fuer hoehere Genauigkeit (langsamer) alternativ 'medium' (~1.5GB):"
+    echo "     curl -L -o models/whisper/ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
 fi
 
 # --- llama.cpp ------------------------------------------------------------
@@ -116,6 +118,9 @@ EOF
 fi
 
 # --- Piper (TTS) ------------------------------------------------------------
+# `piper-tts` ist Teil der "voice"-Extras (pyproject.toml) und wurde damit
+# bereits oben zusammen mit den Python-Abhaengigkeiten installiert. Dieser
+# Block ist ein Fallback, falls nur die Basis-Abhaengigkeiten installiert wurden.
 if command -v piper >/dev/null 2>&1; then
     info "Piper gefunden."
 else
@@ -123,21 +128,19 @@ else
     if confirm "Jetzt via pip installieren (pip install piper-tts)?"; then
         pip install piper-tts
     else
-        cat <<'EOF'
-   Manuelle Installation: https://github.com/rhasspy/piper
-   Empfohlene deutsche maennliche Stimme: de_DE-thorsten-medium
-EOF
+        echo "   Manuelle Installation: https://github.com/rhasspy/piper"
     fi
 fi
 
 mkdir -p "$PROJECT_ROOT/models/piper"
-if [ ! -f "$PROJECT_ROOT/models/piper/de_DE-thorsten-medium.onnx" ]; then
+if [ ! -f "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx" ]; then
     warn "Kein Piper-Sprachmodell in models/piper/ gefunden."
-    if confirm "de_DE-thorsten-medium jetzt herunterladen?"; then
-        BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/medium"
-        curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-medium.onnx" "$BASE_URL/de_DE-thorsten-medium.onnx"
-        curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-medium.onnx.json" "$BASE_URL/de_DE-thorsten-medium.onnx.json"
+    if confirm "Empfohlene deutsche maennliche Stimme de_DE-thorsten-high (natuerlichste Qualitaet, ~114MB) jetzt herunterladen?"; then
+        BASE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high"
+        curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx" "$BASE_URL/de_DE-thorsten-high.onnx"
+        curl -L -o "$PROJECT_ROOT/models/piper/de_DE-thorsten-high.onnx.json" "$BASE_URL/de_DE-thorsten-high.onnx.json"
     fi
+    echo "   Weitere Stimmen zum Vergleichen: siehe README.md Abschnitt 'Voice-Test starten'."
 fi
 
 # --- Asterisk (optional, fuer echte Telefonie) -----------------------------

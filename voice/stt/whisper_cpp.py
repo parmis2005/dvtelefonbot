@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -21,6 +22,19 @@ logger = get_logger(__name__)
 
 class WhisperBinaryNotFoundError(Exception):
     pass
+
+
+# Whisper "halluziniert" auf reiner Stille/Hintergrundgeraeuschen haeufig
+# bracket-/klammer-umschlossene Nicht-Sprache-Marker wie "[Musik]", "[Stille]",
+# "(Schritte)", "[BLANK_AUDIO]" statt echten Text zurueckzugeben. Diese werden
+# entfernt, damit sie nicht als echte Kundenaeusserung in die Conversation
+# Engine gelangen (dort wuerden sie z.B. faelschlich als Antwort verarbeitet).
+_NON_SPEECH_ARTIFACT_RE = re.compile(r"[\[(][^\])]{0,60}[\])]")
+
+
+def strip_non_speech_artifacts(text: str) -> str:
+    cleaned = _NON_SPEECH_ARTIFACT_RE.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 class LocalWhisperProvider(SpeechToTextProvider):
@@ -64,7 +78,10 @@ class LocalWhisperProvider(SpeechToTextProvider):
             if json_path.exists():
                 data = json.loads(json_path.read_text(encoding="utf-8"))
                 text = "".join(seg.get("text", "") for seg in data.get("transcription", []))
-                return TranscriptionResult(text=text.strip(), language=self.language)
+                return TranscriptionResult(
+                    text=strip_non_speech_artifacts(text), language=self.language
+                )
 
             # Fallback: Text aus stdout extrahieren
-            return TranscriptionResult(text=stdout.decode(errors="ignore").strip(), language=self.language)
+            raw = stdout.decode(errors="ignore").strip()
+            return TranscriptionResult(text=strip_non_speech_artifacts(raw), language=self.language)
