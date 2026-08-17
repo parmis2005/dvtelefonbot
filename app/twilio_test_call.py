@@ -130,6 +130,19 @@ async def run(args: argparse.Namespace) -> int:
         print(f"  TwiML-Webhook:                {settings.twilio_public_base_url}/twilio/voice")
         print("\n  Dieser Anruf ist ECHT und KOSTENPFLICHTIG. Das Zieltelefon klingelt wirklich.")
 
+        def _digits_only(n: str) -> str:
+            return "".join(ch for ch in n if ch.isdigit())
+
+        if _digits_only(to_number) == _digits_only(settings.twilio_caller_id):
+            print(
+                "\n  WARNUNG: Von- und Ziel-Nummer sind identisch. Viele Mobilfunknetze "
+                "(insbesondere deutsche) weisen Anrufe mit identischer Anrufer-/Ziel-ID als "
+                "'busy' zurueck, BEVOR Twilio unseren Webhook ueberhaupt aufruft - das "
+                "Telefon klingelt dann nicht, unabhaengig von Darios Konfiguration. Fuer "
+                "einen aussagekraeftigen Test empfiehlt sich eine ANDERE Zielnummer "
+                "(--to +49...) als TWILIO_CALLER_ID."
+            )
+
         answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
         if answer != "ja":
             print("Abgebrochen - kein Anruf ausgeloest.")

@@ -240,3 +240,13 @@ schnellere, aber synthetischer klingende Alternative bestehen
   dtype="int16")` skaliert NICHT zuverlaessig hoch und erzeugte urspruenglich
   fast lautloses/verrauschtes Audio auf der Leitung (siehe
   `phone/twilio_media_handler.py::_stream_wav_file`).
+- **Anrufe mit identischer Von-/Ziel-Nummer scheitern oft mit `busy`**: bei
+  einem echten Testanruf (Von=An=`+491788324883`) lieferte die Twilio-API
+  Status `busy`, Dauer 0s, keine Debugger-Notifications/Alerts, und unser
+  eigener `/twilio/voice`-Webhook wurde nie aufgerufen - der Anruf scheiterte
+  also auf Telefonnetz-Ebene, bevor Twilio ueberhaupt versuchte, Dario zu
+  verbinden. Vermutliche Ursache: (deutsche) Mobilfunknetze weisen Anrufe mit
+  identischer Anrufer-/Ziel-ID haeufig als Anti-Spoofing-Massnahme zurueck.
+  `app/twilio_test_call.py` warnt seither vor dem Bestaetigungs-Prompt, wenn
+  `--to` mit `TWILIO_CALLER_ID` uebereinstimmt. Fuer echte Tests eine andere
+  Zielnummer als die Caller-ID verwenden.
