@@ -2,6 +2,12 @@
 .venv/
 venv/
 __pycache__/
+
+# Root package.json (npm run dev, siehe scripts/dev.js) hat bewusst keine
+# Abhaengigkeiten - falls trotzdem "npm install" im Root ausgefuehrt wird,
+# nicht versionieren (frontend/node_modules hat sein eigenes .gitignore).
+/node_modules/
+/package-lock.json
 *.pyc
 *.pyo
 .pytest_cache/

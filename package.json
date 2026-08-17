@@ -1,0 +1,9 @@
+{
+  "name": "dvtelefonbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Digital Vision Dario - lokaler Startbefehl fuer Backend (FastAPI, .venv) + Dashboard (Next.js), siehe scripts/dev.js",
+  "scripts": {
+    "dev": "node scripts/dev.js"
+  }
+}
