@@ -29,6 +29,7 @@ from database.models import CallResult, CallStatus, CampaignStatus
 from database.repository import CallRepository, CampaignRepository, LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
+from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
 
@@ -147,6 +148,21 @@ class CampaignManager:
                     elif campaign.status == CampaignStatus.RUNNING:
                         active = await self._active_call_count(session, campaign_id)
                         free_slots = max(0, campaign.max_concurrent - active)
+                        if free_slots > 0 and not await self._webhook_reachable(settings):
+                            # Transiente Infrastruktur-Nichterreichbarkeit
+                            # (z.B. Tunnel/Backend gerade nicht erreichbar,
+                            # siehe api/telephony.py fuer den Hintergrund:
+                            # Twilio-Fehler 11200) - KEINE neuen Anrufe in
+                            # diesem Tick, aber die verbleibenden Leads
+                            # bleiben fuer den naechsten Tick unangetastet
+                            # (kein permanentes "uebersprungen" wie bei
+                            # Do-Not-Call/ungueltiger Nummer).
+                            logger.warning(
+                                "Kampagne %s: TWILIO_PUBLIC_BASE_URL gerade nicht erreichbar - "
+                                "starte in diesem Tick keine neuen Anrufe.",
+                                campaign_id,
+                            )
+                            free_slots = 0
                         for lead_id in remaining_lead_ids[:free_slots]:
                             await self._attempt_lead(session, settings, campaign_id, lead_id)
                         if free_slots > 0:
@@ -160,6 +176,11 @@ class CampaignManager:
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
         finally:
             self._tasks.pop(campaign_id, None)
+
+    @staticmethod
+    async def _webhook_reachable(settings: Settings) -> bool:
+        reachable, _ = await check_webhook_reachable(settings.twilio_public_base_url)
+        return reachable
 
     @staticmethod
     async def _attempted_lead_ids(session, campaign_id: int) -> set[int]:

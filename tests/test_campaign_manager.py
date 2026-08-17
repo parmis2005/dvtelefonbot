@@ -41,11 +41,23 @@ class FakeTwilioProvider:
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
 
+async def _fake_webhook_reachable(settings) -> bool:
+    return True
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _campaign_test_env(db_session, monkeypatch):
     FakeTwilioProvider.calls_made = []
     monkeypatch.setattr(campaign_service_module, "TwilioProvider", FakeTwilioProvider)
     monkeypatch.setattr(campaign_service_module, "POLL_INTERVAL_SECONDS", 0.05)
+    # Der echte Erreichbarkeits-Check (services/telephony_diagnostics.py)
+    # wuerde gegen die Fake-URL unten ins Leere laufen (DNS-Fehler, 5s
+    # Timeout) - hier wie ein erreichbarer Tunnel simuliert, da genau diese
+    # Pruefung nicht Gegenstand der Kampagnen-Tests ist (siehe stattdessen
+    # tests/test_telephony_api.py).
+    monkeypatch.setattr(
+        campaign_service_module.CampaignManager, "_webhook_reachable", staticmethod(_fake_webhook_reachable)
+    )
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tokentest")
     monkeypatch.setenv("TWILIO_CALLER_ID", "+491700000000")

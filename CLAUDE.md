@@ -398,3 +398,50 @@ schnellere, aber synthetischer klingende Alternative bestehen
     Unix-Timestamp - ein versehentlich als Timestamp uebergebener `int` fuehrt
     zu einem Ablaufdatum ~56 Jahre in der Zukunft (in dieser Version
     gefunden und behoben, siehe `api/auth.py::login`).
+- **Echter Testanruf brach nach dem Abheben mit Fehleransage ab (Twilio-Fehler
+  11200)**: Root-Cause-Analyse ueber die Twilio-REST-API (`client.calls(sid).
+  notifications.list()`) ergab `ErrorCode 11200, Msg="Got HTTP 502 response to
+  https://.../twilio/voice?call_id=1"` - **kein Code-Fehler**, sondern der
+  ngrok-Tunnel lief zwar (seit Stunden aktiv), aber zum exakten Anrufzeitpunkt
+  war kein Backend-Prozess auf Port 8000 erreichbar (502 kam vom ngrok-Edge,
+  nicht von FastAPI). Lokale `logs/dario.log`-Eintraege zum Anrufzeitpunkt
+  fehlten komplett (nur Test-Suite-Rauschen sichtbar) - das allein war schon
+  der erste Hinweis, dass der Server zu dem Zeitpunkt gar nicht lief.
+  Trotzdem als Haertung umgesetzt, um genau diese Fehlerklasse kuenftig VOR
+  einem echten, kostenpflichtigen Anruf sichtbar zu machen statt erst danach
+  im Twilio-Debugger:
+  - `services/telephony_diagnostics.py::check_webhook_reachable` (per
+    `httpx`-GET gegen `{TWILIO_PUBLIC_BASE_URL}/api/health`, 5s Timeout) -
+    neu genutzt von `api/telephony.py::telephony_status` (Dashboard zeigt
+    jetzt `public_base_url_reachable`, nicht nur "URL gesetzt"), sowie als
+    harter Block VOR dem Ausloesen eines echten Anrufs in
+    `api/telephony.py::trigger_test_call`, `api/calls.py::create_twilio_call`
+    und `services/campaign_service.py::CampaignManager._run_campaign` (dort
+    bewusst NICHT als permanenter Skip wie bei Do-Not-Call behandelt, sondern
+    als transiente Bedingung, die im naechsten Poll-Tick erneut geprueft
+    wird - siehe `CampaignManager._webhook_reachable`). `app/twilio_test_call.py`
+    nutzt denselben Helper (vorher lokal dupliziert).
+  - Zur Verifikation ohne echten Anruf: `tests/test_twilio_media_stream_e2e.py`
+    - ein neuer, permanenter simulierter End-to-End-Test des ECHTEN
+    `/twilio/voice` -> `/twilio/media-stream`-Pfads (nicht nur der isolierten
+    Conversation Engine), der genau diesen Codepfad unabhaengig von
+    Infrastruktur-Verfuegbarkeit durchspielt: connected/start/media/stop-
+    Events, `build_app_context(session)`, `Dario.for_lead`, ein echter STT->
+    Engine->TTS-Umlauf, natuerliche Verabschiedung, echtes `end_call` ueber
+    `TwilioProvider`, sauberes WebSocket-Close, Transkript-/Zusammenfassungs-
+    Persistenz, sowie ein dedizierter Resilienz-Test (TTS-Absturz mitten im
+    Call darf weder den Server noch andere Calls beeintraechtigen). Mockt nur
+    STT/TTS/TwilioProvider an der Provider-Grenze (Chatterbox/whisper.cpp
+    sind fuer die schnelle Test-Suite ungeeignet), alles andere laeuft echt.
+  - Bei dieser Gelegenheit auch `agent/responses.py::ResponseBank.greeting`
+    korrigiert: wich vom mittlerweile verbindlich vorgegebenen Wortlaut ("Guten
+    Tag! Hier ist Dario, der digitale Assistent von Digital Vision aus
+    Moenchengladbach. Haben Sie gerade einen Moment Zeit?") ab - die alte
+    Version fragte stattdessen sofort nach der richtigen Ansprechperson fuer
+    das jeweilige Unternehmen (das uebernimmt jetzt ausschliesslich die
+    separate Gatekeeper-Logik). Mit `tests/test_conversation_flow.py::
+    test_opening_line_matches_mandated_greeting` als Wortlaut-Regressionstest
+    abgesichert. Alle uebrigen woertlich vorgegebenen Formulierungen
+    (Gatekeeper, Nachricht ausrichten, Zwei-Nein-Regel, Wait-Mode, Preise,
+    Verabschiedung, Do-Not-Call) wurden Zeile fuer Zeile mit `agent/
+    responses.py` abgeglichen und stimmten bereits ueberein.

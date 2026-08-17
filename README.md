@@ -319,6 +319,26 @@ Call-Status, Transkript und Zusammenfassung landen wie gewohnt in der
 Datenbank/im Dashboard (`services/call_service.py`,
 `services/transcript_service.py`, `services/summary_service.py`).
 
+**Wichtig vor JEDEM echten Anruf:** Terminal 1 (`uvicorn`) UND Terminal 2
+(`ngrok`) muessen GLEICHZEITIG laufen, und die `TWILIO_PUBLIC_BASE_URL` in
+`.env` muss exakt der aktuell angezeigten ngrok-URL entsprechen (bei jedem
+`ngrok http`-Neustart aendert sie sich). Ein Anruf, der zwar klingelt und
+angenommen wird, aber sofort danach mit einer Fehleransage abbricht, bedeutet
+fast immer: einer der beiden Prozesse lief zu diesem Zeitpunkt nicht (bzw.
+die URL ist veraltet) - Twilio meldet das als Fehler 11200 ("Got HTTP 502
+response"), siehe CLAUDE.md. Vor einem Testanruf pruefen:
+
+```bash
+curl -s $(grep TWILIO_PUBLIC_BASE_URL .env | cut -d= -f2)/api/health
+```
+
+Liefert das `{"status":"ok",...}` zurueck, ist der Pfad bereit. Dasselbe
+zeigt auch das DVTelefonbot Dashboard live an: Seite **Telefonie** ->
+"Öffentliche URL" (`api/telephony.py::telephony_status`, Feld
+`public_base_url_reachable`) - ist der Tunnel/das Backend nicht erreichbar,
+blockiert das Dashboard einen Testanruf jetzt von sich aus mit einer
+klaren Fehlermeldung, statt den Kunden umsonst klingeln zu lassen.
+
 ## 16. Fehlerdiagnose
 
 | Symptom | Wahrscheinliche Ursache | Loesung |

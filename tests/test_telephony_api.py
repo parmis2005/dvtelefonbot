@@ -34,6 +34,10 @@ class FakeTwilioProvider:
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
 
+async def _fake_webhook_reachable(base_url: str) -> tuple[bool, str]:
+    return True, "erreichbar (Test)"
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     FakeTwilioProvider.calls_made = []
@@ -48,6 +52,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWILIO_CALLER_ID", "+491700000000")
     monkeypatch.setenv("TWILIO_PUBLIC_BASE_URL", "https://example-tunnel.test")
     monkeypatch.setattr(telephony_module, "TwilioProvider", FakeTwilioProvider)
+    # Default: Tunnel gilt als erreichbar (die echte Pruefung wuerde gegen
+    # die Fake-URL oben sonst 5s in einen DNS-Fehler laufen) - dedizierte
+    # Tests unten ueberschreiben dies gezielt, um die neue Sicherheitspruefung
+    # selbst zu verifizieren (siehe services/telephony_diagnostics.py).
+    monkeypatch.setattr(telephony_module, "check_webhook_reachable", _fake_webhook_reachable)
     get_settings.cache_clear()
 
     asyncio.run(reset_engine_for_tests())
@@ -115,4 +124,39 @@ def test_trigger_test_call_blocked_by_do_not_call(client):
 
     response = client.post("/api/telephony/test-call", json={"to_number": "+491708888888"})
     assert response.status_code == 409
+    assert len(FakeTwilioProvider.calls_made) == 0
+
+
+def test_status_reports_unreachable_webhook_url(client, monkeypatch):
+    """Direkte Regression fuer den Vorfall: ein echter Testanruf schlug mit
+    Twilio-Fehler 11200 ('Got HTTP 502 response') fehl, weil
+    TWILIO_PUBLIC_BASE_URL zum Anrufzeitpunkt nicht erreichbar war - das
+    Dashboard zeigte das vorher nicht an (nur "konfiguriert", nicht ob
+    tatsaechlich erreichbar)."""
+
+    async def fake_unreachable(base_url: str) -> tuple[bool, str]:
+        return False, "Got HTTP 502 response"
+
+    monkeypatch.setattr(telephony_module, "check_webhook_reachable", fake_unreachable)
+
+    response = client.get("/api/telephony/status")
+    body = response.json()
+    assert body["public_base_url_configured"] is True
+    assert body["public_base_url_reachable"] is False
+    assert "502" in body["public_base_url_detail"]
+
+
+def test_trigger_test_call_blocked_when_webhook_unreachable(client, monkeypatch):
+    """Verhindert genau den gemeldeten Vorfall: kein Anruf wird ausgeloest,
+    wenn der Tunnel/das Backend zum Zeitpunkt des Testanrufs nicht
+    erreichbar ist - vorher liess Twilio in diesem Fall das Zieltelefon
+    klingeln, spielte danach aber eine Fehleransage ab."""
+
+    async def fake_unreachable(base_url: str) -> tuple[bool, str]:
+        return False, "Got HTTP 502 response"
+
+    monkeypatch.setattr(telephony_module, "check_webhook_reachable", fake_unreachable)
+
+    response = client.post("/api/telephony/test-call", json={"to_number": "+491707777777"})
+    assert response.status_code == 502
     assert len(FakeTwilioProvider.calls_made) == 0

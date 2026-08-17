@@ -7,6 +7,26 @@ import pytest
 from agent.state_machine import CallState
 from tests.factories import make_context, make_engine
 
+# --- Feste Begruessung (verbindliche Gespraechsvorlage) --------------------
+
+
+@pytest.mark.asyncio
+async def test_opening_line_matches_mandated_greeting():
+    """Die woertlich vorgegebene Begruessung ist deterministisch (kein LLM) -
+    Dario fragt zuerst nach einem Moment Zeit, statt sofort nach der
+    richtigen Ansprechperson fuer das jeweilige Unternehmen zu fragen (das
+    passiert separat ueber die Gatekeeper-Logik, siehe Tests 10)."""
+    engine = make_engine()
+    ctx = make_context(state=CallState.INITIAL)
+
+    opening = engine.opening_line(ctx)
+
+    assert opening == (
+        "Guten Tag! Hier ist Dario, der digitale Assistent von Digital Vision aus "
+        "Moenchengladbach. Haben Sie gerade einen Moment Zeit?"
+    )
+
+
 # --- Test 10: Gatekeeper ---------------------------------------------------
 
 

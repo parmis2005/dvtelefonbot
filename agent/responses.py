@@ -26,11 +26,17 @@ class ResponseBank:
     # --- Begruessung / Gatekeeper (Abschnitt 14) ---
 
     def greeting(self, lead: LeadData) -> str:
-        firma = f" bei der Firma {lead.unternehmen}" if lead.has("unternehmen") else ""
+        # Feste, woertlich vorgegebene Begruessung (nicht mehr lead-spezifisch
+        # wie zuvor - die Pruefung, ob die richtige Ansprechperson am Telefon
+        # ist, passiert jetzt separat ueber gatekeeper_ask_responsible(),
+        # sobald sich das im Gespraech als noetig erweist). `lead` bleibt
+        # Teil der Signatur fuer Konsistenz mit den uebrigen ResponseBank-
+        # Methoden und moegliche kuenftige Personalisierung.
+        del lead
         return (
-            f"Guten Tag, hier spricht {self.agent_name}, die digitale Assistenz von "
-            f"{self.company_name} aus {self.company_location}. Spreche ich{firma} mit der "
-            f"richtigen Ansprechperson fuer Ihre Webseite?"
+            f"Guten Tag! Hier ist {self.agent_name}, der digitale Assistent von "
+            f"{self.company_name} aus {self.company_location}. Haben Sie gerade "
+            "einen Moment Zeit?"
         )
 
     def gatekeeper_ask_responsible(self) -> str:

@@ -22,14 +22,13 @@ import argparse
 import asyncio
 import sys
 
-import httpx
-
 from core.config import get_settings
 from core.logging import get_logger
 from database.database import get_session_factory, init_db
 from database.repository import LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
+from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
 
@@ -48,17 +47,6 @@ async def _get_or_create_test_lead(session, phone_number: str):
         entwurf_vorhanden=True,
         entwurf_link="https://beispiel.digital-vision-entwurf.de/demo",
     )
-
-
-async def _check_webhook_reachable(base_url: str) -> tuple[bool, str]:
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            response = await client.get(f"{base_url}/api/health")
-            if response.status_code == 200:
-                return True, "erreichbar"
-            return False, f"antwortet mit Status {response.status_code}"
-    except httpx.HTTPError as exc:
-        return False, str(exc)
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -104,7 +92,7 @@ async def run(args: argparse.Namespace) -> int:
     print(f"  OK ({detail})")
 
     print(f"\n[2/3] Pruefe Erreichbarkeit von {settings.twilio_public_base_url} ...")
-    reachable, reach_detail = await _check_webhook_reachable(settings.twilio_public_base_url)
+    reachable, reach_detail = await check_webhook_reachable(settings.twilio_public_base_url)
     if reachable:
         print(f"  OK ({reach_detail})")
     else:

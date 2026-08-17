@@ -31,6 +31,10 @@ class FakeTwilioProvider:
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
 
+async def _fake_webhook_reachable(settings) -> bool:
+    return True
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     FakeTwilioProvider.calls_made = []
@@ -44,6 +48,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWILIO_PUBLIC_BASE_URL", "https://example-tunnel.test")
     monkeypatch.setattr(campaign_service_module, "TwilioProvider", FakeTwilioProvider)
     monkeypatch.setattr(campaign_service_module, "POLL_INTERVAL_SECONDS", 0.05)
+    # Simuliert einen erreichbaren Tunnel - siehe tests/test_campaign_manager.py
+    # fuer den Hintergrund (services/telephony_diagnostics.py).
+    monkeypatch.setattr(
+        campaign_service_module.CampaignManager, "_webhook_reachable", staticmethod(_fake_webhook_reachable)
+    )
     get_settings.cache_clear()
 
     asyncio.run(reset_engine_for_tests())

@@ -26,6 +26,7 @@ from phone.asterisk import AsteriskProvider
 from phone.call_controller import CallController
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallNotAllowedError, CallService
+from services.telephony_diagnostics import check_webhook_reachable
 from tools.call_tools import ToolExecutor
 
 router = APIRouter(prefix="/api/calls", tags=["calls"], dependencies=[Depends(require_auth)])
@@ -163,6 +164,19 @@ async def create_twilio_call(payload: CallCreate, session: DbSession) -> CallOut
         raise HTTPException(
             status_code=502,
             detail="TWILIO_PUBLIC_BASE_URL/TWILIO_CALLER_ID fehlt in .env - kein Call gestartet.",
+        )
+
+    # Erreichbarkeit VOR dem Anruf pruefen (siehe api/telephony.py fuer den
+    # Hintergrund: Twilio-Fehler 11200 "Got HTTP 502 response", wenn der
+    # Tunnel/das Backend zum Anrufzeitpunkt nicht erreichbar ist).
+    url_reachable, url_detail = await check_webhook_reachable(settings.twilio_public_base_url)
+    if not url_reachable:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"TWILIO_PUBLIC_BASE_URL ist gerade nicht erreichbar ({url_detail}) - kein "
+                "Anruf ausgeloest. Laeuft der Tunnel und das Backend?"
+            ),
         )
 
     lead = await LeadRepository(session).get(payload.lead_id)
