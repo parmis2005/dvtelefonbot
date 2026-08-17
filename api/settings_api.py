@@ -38,6 +38,7 @@ _EDITABLE_KEYS = (
     "agent_name",
     "company_name",
     "company_location",
+    "voice_test_text",
     "wait_timeout_seconds",
     "silence_timeout_seconds",
     "call_cooldown_seconds",
@@ -65,6 +66,9 @@ def _defaults() -> dict[str, str]:
         "agent_name": settings.agent_name,
         "company_name": settings.company_name,
         "company_location": settings.company_location,
+        "voice_test_text": (
+            "Guten Tag, hier ist Dario von Digital Vision. Ich melde mich kurz zu Ihrem Online-Auftritt."
+        ),
         "wait_timeout_seconds": str(settings.wait_timeout),
         "silence_timeout_seconds": str(settings.silence_timeout),
         "call_cooldown_seconds": str(settings.call_cooldown),

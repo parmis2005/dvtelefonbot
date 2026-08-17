@@ -322,3 +322,22 @@ def test_full_dashboard_usage_flow_keeps_same_session_authenticated(client):
     # Am Ende immer noch dieselbe Session - kein einziger Schritt hat einen
     # (faelschlichen) Logout ausgeloest.
     assert client.get("/api/leads").status_code == 200
+
+
+def test_settings_api_persists_voice_test_text(client):
+    _login(client)
+
+    initial = client.get("/api/settings")
+    assert initial.status_code == 200
+    assert initial.json()["values"]["voice_test_text"]
+
+    updated = client.put(
+        "/api/settings",
+        json={"values": {"voice_test_text": "Neuer Beispieltext fuer den Stimmtest."}},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["values"]["voice_test_text"] == "Neuer Beispieltext fuer den Stimmtest."
+
+    reloaded = client.get("/api/settings")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["values"]["voice_test_text"] == "Neuer Beispieltext fuer den Stimmtest."
