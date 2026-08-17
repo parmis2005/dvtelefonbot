@@ -445,3 +445,24 @@ schnellere, aber synthetischer klingende Alternative bestehen
     (Gatekeeper, Nachricht ausrichten, Zwei-Nein-Regel, Wait-Mode, Preise,
     Verabschiedung, Do-Not-Call) wurden Zeile fuer Zeile mit `agent/
     responses.py` abgeglichen und stimmten bereits ueberein.
+- **Dashboard-Login "tat nichts" (`localhost` vs. `127.0.0.1`)**: das Backend
+  war erreichbar, der Login-Request lief erfolgreich (200, korrektes
+  Set-Cookie ueber curl verifiziert), aber der Browser landete nie im
+  Dashboard. Ursache: `frontend/.env.local` zeigte auf
+  `http://127.0.0.1:8000`, waehrend das Dashboard selbst unter
+  `http://localhost:3000` lief - Browser werten `localhost` und `127.0.0.1`
+  als unterschiedliche SITES (nicht nur unterschiedliche Origins), wodurch
+  das `SameSite=Lax`-Session-Cookie (`core/auth.py`) bei jedem Cross-Site-
+  Fetch NACH dem Login verworfen wird (das Set-Cookie selbst kommt noch an,
+  wird aber nie zurueckgeschickt). Behoben durch `NEXT_PUBLIC_API_BASE_URL=
+  http://localhost:8000` (passend zum Dashboard-Host) in `.env.local`/
+  `.env.example` sowie denselben Fallback-Default in `src/lib/api.ts` und
+  `src/lib/useLiveStatus.ts`. Zwei Fallstricke beim Beheben selbst: (1)
+  `NEXT_PUBLIC_*`-Variablen werden nur beim Start des Dev-Servers eingebaut,
+  nicht live nachgeladen - ein Neustart ist Pflicht; (2) Turbopacks Dev-Cache
+  hatte den alten Wert bereits kompiliert und lieferte ihn nach einem reinen
+  Prozess-Neustart weiter aus - erst `rm -rf frontend/.next` plus Neustart
+  baute den neuen Wert tatsaechlich ein (verifiziert durch Grep im
+  kompilierten Chunk: `("TURBOPACK compile-time value", "http://localhost:
+  8000")`). Kompletter Login/Logout-Zyklus danach per curl mit Origin-Header
+  gegen das echte laufende Backend verifiziert.

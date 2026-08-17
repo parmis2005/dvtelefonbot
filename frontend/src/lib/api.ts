@@ -1,4 +1,8 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+// Fallback bewusst auf "localhost" statt "127.0.0.1": Browser behandeln
+// beide als unterschiedliche SITES, wodurch das SameSite=Lax-Session-Cookie
+// (core/auth.py) bei Cross-Site-Fetches verworfen wird, wenn das Dashboard
+// selbst z.B. unter http://localhost:3000 laeuft (siehe .env.example).
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;

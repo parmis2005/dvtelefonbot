@@ -414,6 +414,20 @@ Dashboard: http://localhost:3000/ (leitet zu `/login`, falls nicht
 angemeldet). Zugangsdaten stehen in der lokalen `.env` des Backends
 (`DASHBOARD_USERNAME`/`DASHBOARD_PASSWORD`).
 
+**Wichtig - `localhost` statt `127.0.0.1` verwenden:** `frontend/.env.local`
+muss `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` sein (nicht
+`http://127.0.0.1:8000`), sobald das Dashboard selbst unter `localhost:3000`
+aufgerufen wird - Browser behandeln `localhost` und `127.0.0.1` als
+unterschiedliche SITES (nicht nur unterschiedliche Origins). Das
+Session-Cookie ist `SameSite=Lax` (siehe `core/auth.py`), und genau dieses
+Attribut wird bei Cross-Site-Fetches vom Browser ignoriert - der Login sieht
+dann scheinbar erfolgreich aus (Set-Cookie kommt an), aber jede folgende
+Anfrage schickt das Cookie nicht mehr mit, wodurch man nie im Dashboard
+landet ("Anmelden tut nichts"). `.env.example` hat bereits den richtigen
+Default; nach einer Aenderung an `NEXT_PUBLIC_*`-Variablen den Dev-Server neu
+starten (Next.js baut sie nur beim Start ein, nicht live) und bei Bedarf
+`frontend/.next/` loeschen, falls Turbopack einen alten Wert zwischenspeichert.
+
 **Deployment:** Frontend fuer Vercel vorbereitet (`NEXT_PUBLIC_API_BASE_URL`
 als Vercel-Umgebungsvariable auf die oeffentliche Backend-URL setzen). Das
 Backend bleibt bewusst ein separater, dauerhaft laufender Server (z.B. VPS) -
