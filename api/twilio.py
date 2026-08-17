@@ -166,8 +166,6 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
         call_id, stream_sid, twilio_call_sid,
     )
 
-    settings = get_settings()
-    ctx = build_app_context()
     session_factory = get_session_factory()
 
     async with session_factory() as session:
@@ -176,6 +174,13 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             logger.error("Media Stream fuer unbekannten Call %s - schliesse Verbindung", call_id)
             await websocket.close(code=4404)
             return
+
+        # Mit Session: liest Dashboard-Ueberschreibungen (Agent-Name/Firma/
+        # Standort/Wartezeit/Stille-Timeout/Cooldown, siehe
+        # services/effective_settings.py) - ein NEUER Call bekommt automatisch
+        # die zuletzt im Dashboard gespeicherten Werte.
+        ctx = await build_app_context(session)
+        settings = ctx.settings
 
         tool_executor = ToolExecutor(session, ctx.email_provider, ctx.whatsapp_provider, settings.company_name)
         dario = await Dario.for_lead(
@@ -201,6 +206,8 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             twilio_provider=twilio_provider,
             stream_sid=stream_sid,
             twilio_call_sid=twilio_call_sid,
+            silence_timeout_ms=int(settings.silence_timeout * 1000),
+            wait_timeout_seconds=settings.wait_timeout,
         )
         try:
             await session_handler.run()

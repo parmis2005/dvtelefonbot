@@ -18,7 +18,7 @@ export default function RootPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-dv-background">
-      <p className="text-sm text-dv-text-muted">Lade...</p>
+      <p className="text-sm text-dv-text-muted">Lädt...</p>
     </div>
   );
 }

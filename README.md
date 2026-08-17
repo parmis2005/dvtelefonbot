@@ -410,20 +410,30 @@ abfragt - kein echtes Event-Pub/Sub aus der Media-Stream-Session heraus (das
 haette den bereits verifizierten Twilio-Audio-Pfad angefasst), aber fuer eine
 Status-Anzeige (nicht die Audio-Echtzeitschleife selbst) ausreichend "live".
 
+**Alle Einstellungen echt verdrahtet:** Agent-Name/Firma/Standort sowie
+Anruf-Cooldown/Wartezeit/Stille-Timeout und die Kampagnen-Parallelitaet
+werden ueber `services/effective_settings.py` gelesen und wirken auf JEDEN
+neuen Call-Start (Einzelanruf, Testanruf, Kampagne) - ohne Backend-Neustart,
+siehe CLAUDE.md fuer die technischen Details. Dabei wurde auch die bis dahin
+unverdrahtete "Sind Sie noch da?"-Logik bei abgelaufener Wartezeit fertig
+gebaut (`agent/dario.py::Dario.check_wait_timeout`).
+
 **Ehrlich offene Punkte (Stand dieser Version):**
-- `api/settings_api.py`: nur die Kampagnen-Parallelitaets-Einstellungen sind
-  echt an die Kampagnen-Engine angebunden. Agent-Name/Firma/Standort und die
-  Anruf-Timeouts (Cooldown/Warte-/Stille-Timeout) werden im
-  Einstellungen-Bereich nur informativ angezeigt (Herkunft `.env`) - eine
-  echte Laufzeit-Ueberschreibung dieser Werte ist noch nicht verdrahtet.
 - Kein automatisierter Browser-Test (kein Headless-Browser/Playwright in
   dieser Umgebung verfuegbar) - verifiziert wurden `npm run build`,
-  `npm run lint` (beide fehlerfrei), sowie ein manueller End-to-End-Rauchtest
-  per `curl` gegen das echte laufende Backend (Login, Session-Cookie,
-  geschuetzte Routen, automatisches Seeding von Prompt-Version/Stimme aus der
-  bestehenden Produktionskonfiguration). Ein Klick-Durchlauf im echten
-  Browser vor dem produktiven Einsatz wird empfohlen.
-- CSV-Import/Sammelanruf-Auswahl/Do-Not-Call/Kampagnen-Engine sind ueber
-  `tests/test_api_dashboard.py` und `tests/test_campaign_manager.py`
-  end-to-end gegen die echte FastAPI-App getestet (mit einem Fake-Twilio-
-  Provider statt echter Anrufe).
+  `npm run lint` (beide fehlerfrei), 94 Backend-Tests per `pytest`
+  (u.a. `tests/test_api_dashboard.py`, `tests/test_campaign_manager.py`,
+  `tests/test_effective_settings.py`, `tests/test_voices_api.py`,
+  `tests/test_telephony_api.py`, `tests/test_calls_api.py`, echte FastAPI-App,
+  Fake-Twilio-Provider statt echter Anrufe), sowie mehrere manuelle
+  End-to-End-Rauchtests per `curl` gegen das echte laufende Backend (Login,
+  Session-Cookie, geschuetzte Routen, automatisches Seeding von
+  Prompt-Version/Stimme aus der bestehenden Produktionskonfiguration,
+  Einstellungen-Rundlauf inkl. Zuruecksetzen auf die Produktionswerte danach).
+  Ein Klick-Durchlauf im echten Browser vor dem produktiven Einsatz wird
+  empfohlen.
+- CSV-Import/Sammelanruf-Auswahl/Do-Not-Call/Kampagnen-Engine/Stimmen-
+  Verwaltung/Telefonie-Testanruf sind ueber `tests/test_api_dashboard.py`,
+  `tests/test_campaign_manager.py`, `tests/test_voices_api.py` und
+  `tests/test_telephony_api.py` end-to-end gegen die echte FastAPI-App
+  getestet (mit einem Fake-Twilio-Provider statt echter Anrufe).

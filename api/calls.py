@@ -99,15 +99,17 @@ async def get_call(call_id: int, session: DbSession) -> CallOut:
 
 @router.post("", response_model=CallOut, status_code=201)
 async def create_call(payload: CallCreate, session: DbSession) -> CallOut:
-    settings = get_settings()
+    # Mit Session: liest Dashboard-Ueberschreibungen (Abschnitt 28, siehe
+    # services/effective_settings.py) - ein NEUER Call bekommt automatisch
+    # die zuletzt im Dashboard gespeicherten Werte.
+    ctx = await build_app_context(session)
+    settings = ctx.settings
     call_service = CallService(session, settings)
 
     try:
         allowed, reason = await call_service.can_start_call(payload.lead_id)
         if not allowed:
             raise HTTPException(status_code=409, detail=reason)
-
-        ctx = build_app_context()
 
         async def dario_factory(lead_id: int, call_id: int) -> Dario:
             tool_executor = ToolExecutor(session, ctx.email_provider, ctx.whatsapp_provider, settings.company_name)

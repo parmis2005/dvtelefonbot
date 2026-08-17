@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent.guardrails import guard_outbound_call, is_valid_phone
 from core.config import Settings
 from database.models import Call, CallStatus
-from database.repository import CallRepository, DoNotCallRepository, LeadRepository
+from database.repository import (
+    AppSettingRepository,
+    CallRepository,
+    DoNotCallRepository,
+    LeadRepository,
+)
 from services.lead_service import is_valid_phone_number
 
 
@@ -37,7 +42,7 @@ class CallService:
 
         phone_valid = is_valid_phone(lead.telefonnummer) or is_valid_phone_number(lead.telefonnummer)
         cooldown_ok, cooldown_reason = await self.lead_repo.can_call_now(
-            lead_id, self.settings.call_cooldown
+            lead_id, await self._effective_call_cooldown()
         )
         allowed, guard_reason = guard_outbound_call(
             do_not_call=is_blocked, phone_valid=phone_valid, cooldown_ok=cooldown_ok
@@ -48,6 +53,18 @@ class CallService:
             reason = cooldown_reason if not cooldown_ok else guard_reason
             return False, reason
         return True, "ok"
+
+    async def _effective_call_cooldown(self) -> int:
+        """Liest eine im Dashboard gespeicherte Cooldown-Ueberschreibung
+        (Abschnitt 28 "Einstellungen", database/models.py::AppSetting), sonst
+        .env-Fallback (self.settings.call_cooldown)."""
+        stored = await AppSettingRepository(self.session).get("call_cooldown_seconds")
+        if stored:
+            try:
+                return int(stored)
+            except ValueError:
+                pass
+        return self.settings.call_cooldown
 
     async def start_call(self, lead_id: int) -> Call:
         allowed, reason = await self.can_start_call(lead_id)

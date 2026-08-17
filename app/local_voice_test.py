@@ -50,7 +50,10 @@ async def _get_or_create_test_lead(session, args) -> int:
 
 async def run_voice_test(args: argparse.Namespace) -> None:
     await init_db()
-    ctx = build_app_context()
+    # Ohne Session bewusst nur .env-Werte: der lokale Mikrofon-Test laeuft
+    # unabhaengig vom Dashboard, die STT/TTS-Verfuegbarkeitspruefung direkt
+    # unten braucht ohnehin keine Dashboard-Ueberschreibungen.
+    ctx = await build_app_context()
     settings = ctx.settings
 
     stt = LocalWhisperProvider(settings.whisper_cpp_binary, settings.whisper_model_path, settings.whisper_language)

@@ -344,14 +344,39 @@ schnellere, aber synthetischer klingende Alternative bestehen
   allen Tests korrekt erkannt.
 - **DVTelefonbot Dashboard (`frontend/`, siehe README Abschnitt 17) - Stand
   dieser Version:**
-  - `api/settings_api.py`: nur die Kampagnen-Parallelitaets-Einstellungen
-    (Standard/Max/Pause zwischen Anrufen) sind echt an
-    `services/campaign_service.py` angebunden. Agent-Name/Firma/Standort und
-    die Anruf-Timeouts (Cooldown/Warte-/Stille-Timeout) werden im
-    Einstellungen-Bereich nur informativ aus `.env` angezeigt, nicht per
-    Dashboard ueberschreibbar - `_EDITABLE_KEYS` in `api/settings_api.py`
-    bewusst schmal gehalten, statt dekorative, wirkungslose Eingabefelder
-    anzubieten.
+  - `api/settings_api.py`: alle dort editierbaren Werte (Agent-Name/Firma/
+    Standort, Anruf-Cooldown/Wartezeit/Stille-Timeout, Kampagnen-Standard-/
+    Max-Parallelitaet/Pause zwischen Anrufen) sind echt verdrahtet, siehe
+    `services/effective_settings.py::get_effective_settings` - liest
+    `database/models.py::AppSetting`-Ueberschreibungen und ueberlagert sie
+    zur Call-Start-Zeit auf die .env-Basiswerte (`core/config.py::Settings`),
+    OHNE den prozessweit gecachten Settings-Singleton zu mutieren
+    (`Settings.model_copy(update=...)` statt In-Place-Zuweisung - sonst
+    wuerden gleichzeitige Anrufe sich gegenseitig Werte ueberschreiben).
+    Eingebunden in `app/bootstrap.py::build_app_context(session)` (Agent-
+    Name/Firma/Standort -> `ConversationEngine`/`ResponseBank`, Wartezeit ->
+    `phone/twilio_media_handler.py`, Stille-Timeout -> `EndpointDetector`)
+    und `services/call_service.py::CallService._effective_call_cooldown`
+    (liest direkt ueber `self.session`, gilt daher automatisch fuer JEDEN
+    Call-Startpfad: Einzelanruf, Testanruf, Kampagne). Wie bei Prompt-Version
+    und Stimme gilt: ein bereits laufendes Gespraech behaelt seine beim Start
+    gepinnten Werte, ein NEUER Call bekommt automatisch die zuletzt im
+    Dashboard gespeicherten Werte - kein Backend-Neustart noetig.
+  - **"Sind Sie noch da?" bei Wartezeit-Ablauf neu gebaut**
+    (`agent/dario.py::Dario.check_wait_timeout`, aufgerufen aus
+    `phone/twilio_media_handler.py`'s Hauptschleife nach jeder ergebnislosen
+    Zuhoer-Phase): existierte vorher nur als unverdrahtetes Geruest
+    (`ConversationContext.wait_started_at`/`still_there_asked`,
+    `ResponseBank.still_there()` waren definiert, aber nirgends
+    zusammengeschaltet - `settings.wait_timeout` wurde ausschliesslich vom
+    Asterisk-Pfad gelesen, nie vom verifizierten Twilio-Pfad). Greift nur,
+    wenn der Kunde zuvor explizit um eine Wartepause gebeten hat
+    (`context.wait_mode`): nach Ablauf der Wartezeit fragt Dario einmalig
+    "Sind Sie noch da?", bleibt fuer eine zweite gleich lange Gnadenfrist
+    still und beendet das Gespraech erst danach hoeflich - ueber denselben
+    `_finalize_call()`-Pfad wie jedes reguläre Gespraechsende (Transkript/
+    Zusammenfassung werden dabei genauso persistiert). Mit
+    `tests/test_effective_settings.py` verifiziert (inkl. Persistenz-Check).
   - Live-Status (`api/live_status.py`, `/ws/live-status`) ist Polling-basiert
     (Backend fragt alle 1.5s die DB ab und sendet das Ergebnis), kein echtes
     Event-Pub/Sub aus der Twilio-Media-Stream-Session heraus - fuer eine

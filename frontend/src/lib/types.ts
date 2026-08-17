@@ -123,7 +123,6 @@ export interface TelephonyStatus {
 
 export interface DashboardSettings {
   values: Record<string, string>;
-  readonly_info: Record<string, string>;
 }
 
 export interface CsvPreviewRow {

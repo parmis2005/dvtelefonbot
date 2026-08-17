@@ -2,6 +2,14 @@
 
 Persistiert in database/models.py::AppSetting (nicht .env - siehe dessen
 Docstring). Werte werden als Strings gespeichert und beim Lesen typisiert.
+
+Wirkung ohne Backend-Neustart: alle hier editierbaren Werte werden bei jedem
+NEUEN Call-Start ueber services/effective_settings.py::get_effective_settings
+gelesen und auf die .env-Basiswerte ueberlagert (agent_name/company_name/
+company_location/wait_timeout/silence_timeout in app/bootstrap.py::
+build_app_context, call_cooldown in services/call_service.py::CallService).
+Ein bereits laufendes Gespraech behaelt seine beim Start gepinnten Werte -
+exakt dasselbe Prinzip wie bei Prompt-Version und Stimme (siehe CLAUDE.md).
 """
 
 from __future__ import annotations
@@ -21,27 +29,23 @@ router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depe
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
-# Schluessel, die ueber das Dashboard editierbar UND tatsaechlich verdrahtet
-# sind (siehe api/campaigns.py::create_campaign, das
-# campaign_default_concurrency/campaign_max_concurrency liest). Bewusst
-# schmal gehalten: agent_name/company_name/company_location/Timeouts stehen
-# noch nicht hier, weil sie aktuell aus core/config.py::Settings (.env,
-# prozessweit gecacht) in mehreren Modulen gelesen werden - eine echte
-# Laufzeit-Ueberschreibung dieser Werte braucht eine eigene Anbindung, die
-# noch aussteht, statt hier nur dekorativ editierbare Felder ohne Wirkung
-# anzubieten.
+# Alle Schluessel, die ueber das Dashboard editierbar UND tatsaechlich
+# verdrahtet sind - siehe Moduldocstring fuer die jeweilige Anbindung.
 _EDITABLE_KEYS = (
     "campaign_default_concurrency",
     "campaign_max_concurrency",
     "campaign_pause_between_calls_seconds",
+    "agent_name",
+    "company_name",
+    "company_location",
+    "wait_timeout_seconds",
+    "silence_timeout_seconds",
+    "call_cooldown_seconds",
 )
 
 
 class SettingsOut(BaseModel):
     values: dict[str, str]
-    # Nur informativ angezeigt (Herkunft .env) - hier NICHT editierbar, siehe
-    # Kommentar zu _EDITABLE_KEYS oben.
-    readonly_info: dict[str, str]
 
 
 class SettingsUpdate(BaseModel):
@@ -49,31 +53,34 @@ class SettingsUpdate(BaseModel):
 
 
 def _defaults() -> dict[str, str]:
+    """Fallback-Werte, solange noch keine Dashboard-Ueberschreibung
+    gespeichert wurde - aus der .env-Konfiguration (core/config.py::Settings)
+    uebernommen, damit das Einstellungen-Formular nie leer/willkuerlich
+    startet, sondern den tatsaechlich aktiven Wert zeigt."""
+    settings = get_settings()
     return {
         "campaign_default_concurrency": "10",
         "campaign_max_concurrency": "10",
         "campaign_pause_between_calls_seconds": "0",
-    }
-
-
-def _readonly_info() -> dict[str, str]:
-    settings = get_settings()
-    return {
         "agent_name": settings.agent_name,
         "company_name": settings.company_name,
         "company_location": settings.company_location,
-        "call_cooldown_seconds": str(settings.call_cooldown),
         "wait_timeout_seconds": str(settings.wait_timeout),
         "silence_timeout_seconds": str(settings.silence_timeout),
+        "call_cooldown_seconds": str(settings.call_cooldown),
     }
+
+
+async def _merged_settings(session: AsyncSession) -> dict[str, str]:
+    stored = await AppSettingRepository(session).get_all()
+    merged = _defaults()
+    merged.update({k: v for k, v in stored.items() if k in _EDITABLE_KEYS and v.strip()})
+    return merged
 
 
 @router.get("", response_model=SettingsOut)
 async def get_dashboard_settings(session: DbSession) -> SettingsOut:
-    stored = await AppSettingRepository(session).get_all()
-    merged = _defaults()
-    merged.update({k: v for k, v in stored.items() if k in _EDITABLE_KEYS})
-    return SettingsOut(values=merged, readonly_info=_readonly_info())
+    return SettingsOut(values=await _merged_settings(session))
 
 
 @router.put("", response_model=SettingsOut)
@@ -81,15 +88,10 @@ async def update_dashboard_settings(payload: SettingsUpdate, session: DbSession)
     repo = AppSettingRepository(session)
     to_store = {k: v for k, v in payload.values.items() if k in _EDITABLE_KEYS}
     await repo.set_many(to_store)
-    stored = await repo.get_all()
-    merged = _defaults()
-    merged.update({k: v for k, v in stored.items() if k in _EDITABLE_KEYS})
-    return SettingsOut(values=merged, readonly_info=_readonly_info())
+    return SettingsOut(values=await _merged_settings(session))
 
 
 async def get_campaign_concurrency_defaults(session: AsyncSession) -> tuple[int, int]:
     """Von api/campaigns.py genutzt: (default_concurrency, max_concurrency)."""
-    stored = await AppSettingRepository(session).get_all()
-    merged = _defaults()
-    merged.update({k: v for k, v in stored.items() if k in _EDITABLE_KEYS})
+    merged = await _merged_settings(session)
     return int(merged["campaign_default_concurrency"]), int(merged["campaign_max_concurrency"])

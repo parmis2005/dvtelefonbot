@@ -17,16 +17,23 @@ export default function EinstellungenPage() {
 
   return (
     <div>
-      <PageHeader title="Einstellungen" subtitle="Laufzeit-Konfiguration von Dario" />
+      <PageHeader
+        title="Einstellungen"
+        subtitle="Laufzeit-Konfiguration von Dario — wirkt sofort auf alle neuen Anrufe, ohne Backend-Neustart"
+      />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Kampagnen</CardTitle>
+            <CardTitle>Konfiguration</CardTitle>
           </CardHeader>
           <CardContent>
             {settings ? (
-              <SettingsForm key={JSON.stringify(settings.values)} initial={settings} onSaved={() => mutate()} />
+              <SettingsForm
+                key={JSON.stringify(settings.values)}
+                initial={settings}
+                onSaved={() => mutate()}
+              />
             ) : (
               <p className="text-sm text-dv-text-muted">Lädt...</p>
             )}
@@ -35,24 +42,16 @@ export default function EinstellungenPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Weitere Konfiguration</CardTitle>
+            <CardTitle>Aktive Konfiguration</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <InfoRow label="Agent-Name" value={settings?.readonly_info.agent_name ?? "–"} />
-            <InfoRow label="Firma" value={settings?.readonly_info.company_name ?? "–"} />
-            <InfoRow label="Standort" value={settings?.readonly_info.company_location ?? "–"} />
-            <InfoRow label="Anruf-Cooldown (s)" value={settings?.readonly_info.call_cooldown_seconds ?? "–"} />
-            <InfoRow label="Warte-Timeout (s)" value={settings?.readonly_info.wait_timeout_seconds ?? "–"} />
-            <InfoRow label="Stille-Timeout (s)" value={settings?.readonly_info.silence_timeout_seconds ?? "–"} />
             <InfoRow
               label="Aktive Prompt-Version"
               value={activePrompt ? `Version ${activePrompt.version_number}` : "–"}
             />
             <InfoRow label="Aktive Stimme" value={activeVoice?.name ?? "–"} />
             <p className="pt-2 text-xs text-dv-text-muted">
-              Diese Werte stammen aus der .env-Konfiguration des Backends und sind hier nur zur
-              Übersicht angezeigt — Änderung erfordert aktuell einen Zugriff auf die
-              Server-Konfiguration.
+              Werden auf den Seiten Prompt und Stimme verwaltet.
             </p>
           </CardContent>
         </Card>

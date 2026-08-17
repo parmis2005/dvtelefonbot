@@ -61,6 +61,7 @@ class TwilioMediaStreamSession:
         twilio_call_sid: str | None = None,
         silence_timeout_ms: int = 900,
         max_utterance_seconds: float = 20.0,
+        wait_timeout_seconds: int = 25,
     ):
         self.ws = websocket
         self.dario = dario
@@ -71,6 +72,9 @@ class TwilioMediaStreamSession:
         self.twilio_provider = twilio_provider
         self.silence_timeout_ms = silence_timeout_ms
         self.max_utterance_seconds = max_utterance_seconds
+        # Nur relevant, wenn der Kunde explizit um eine Wartepause gebeten
+        # hat (ConversationContext.wait_mode) - siehe Dario.check_wait_timeout.
+        self.wait_timeout_seconds = wait_timeout_seconds
 
         # Werden ueblicherweise vom Aufrufer schon aus dem "start"-Event
         # herausgelesen uebergeben (siehe api/twilio.py), da dort auch die
@@ -114,6 +118,16 @@ class TwilioMediaStreamSession:
                 if self._stopped.is_set():
                     break
                 if not text:
+                    # Stille: nur relevant, falls der Kunde zuvor explizit um
+                    # eine Wartepause gebeten hat (siehe Dario.check_wait_timeout) -
+                    # ausserhalb des Wait-Mode liefert dies immer None.
+                    timeout_outcome = await self.dario.check_wait_timeout(self.wait_timeout_seconds)
+                    if timeout_outcome is not None:
+                        if timeout_outcome.reply_text:
+                            await self._speak(timeout_outcome.reply_text)
+                        if timeout_outcome.call_ended:
+                            await self._hangup_real_call()
+                            break
                     continue
                 outcome = await self.dario.process_utterance(text)
                 if outcome.reply_text:

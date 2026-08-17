@@ -43,10 +43,10 @@ async def _get_or_create_test_lead(session, args) -> int:
 
 async def run_chat(args: argparse.Namespace) -> None:
     await init_db()
-    ctx = build_app_context()
 
     session_factory = get_session_factory()
     async with session_factory() as session:
+        ctx = await build_app_context(session)
         lead_id = await _get_or_create_test_lead(session, args)
 
         tool_executor = ToolExecutor(

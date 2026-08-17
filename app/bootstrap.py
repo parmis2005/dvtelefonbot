@@ -148,8 +148,23 @@ async def get_tts_provider(session: AsyncSession | None = None) -> TextToSpeechP
     return provider
 
 
-def build_app_context() -> AppContext:
-    settings = get_settings()
+async def build_app_context(session: AsyncSession | None = None) -> AppContext:
+    """Baut den Anwendungskontext fuer einen Call-Start.
+
+    Mit `session` werden Dashboard-Einstellungen (Abschnitt 28, z.B.
+    Agent-Name/Firma/Standort/Wartezeit/Stille-Timeout/Cooldown, siehe
+    services/effective_settings.py) auf die .env-Basiswerte ueberlagert -
+    ein NEUER Call bekommt so automatisch die zuletzt im Dashboard
+    gespeicherten Werte, ohne Backend-Neustart. Ohne `session` (z.B.
+    app/chat_test.py, app/local_voice_test.py - lokale Entwicklungswerkzeuge
+    ohne Dashboard) gelten die reinen .env-Werte."""
+    if session is not None:
+        from services.effective_settings import get_effective_settings
+
+        settings = await get_effective_settings(session)
+    else:
+        settings = get_settings()
+
     business_config = get_business_config()
     configure_logging(settings.log_level, settings.log_dir)
 
