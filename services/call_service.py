@@ -29,7 +29,15 @@ class CallService:
         self.call_repo = CallRepository(session)
         self.dnc_repo = DoNotCallRepository(session)
 
-    async def can_start_call(self, lead_id: int) -> tuple[bool, str]:
+    async def can_start_call(self, lead_id: int, ignore_cooldown: bool = False) -> tuple[bool, str]:
+        """`ignore_cooldown` ist ausschliesslich fuer app/twilio_test_call.py
+        gedacht: ein manuell mit 'ja' bestaetigter Testanruf soll nicht am
+        selben Cooldown scheitern, der wiederholte automatisierte Anrufe bei
+        echten Kunden verhindern soll. Do-Not-Call und Telefonnummer-
+        Validierung bleiben davon UNBERUEHRT und immer erzwungen - nur die
+        Cooldown-Pruefung wird uebersprungen. Alle anderen Aufrufer (Einzel-
+        anruf, Dashboard-Testanruf, Kampagnen) lassen dieses Argument bewusst
+        weg, damit der Cooldown fuer sie unveraendert aktiv bleibt."""
         lead = await self.lead_repo.get(lead_id)
         if lead is None:
             return False, "Lead nicht gefunden"
@@ -41,9 +49,12 @@ class CallService:
         is_blocked = lead.do_not_call or await self.dnc_repo.is_blocked(lead.telefonnummer)
 
         phone_valid = is_valid_phone(lead.telefonnummer) or is_valid_phone_number(lead.telefonnummer)
-        cooldown_ok, cooldown_reason = await self.lead_repo.can_call_now(
-            lead_id, await self._effective_call_cooldown()
-        )
+        if ignore_cooldown:
+            cooldown_ok, cooldown_reason = True, "ok"
+        else:
+            cooldown_ok, cooldown_reason = await self.lead_repo.can_call_now(
+                lead_id, await self._effective_call_cooldown()
+            )
         allowed, guard_reason = guard_outbound_call(
             do_not_call=is_blocked, phone_valid=phone_valid, cooldown_ok=cooldown_ok
         )
@@ -66,8 +77,8 @@ class CallService:
                 pass
         return self.settings.call_cooldown
 
-    async def start_call(self, lead_id: int) -> Call:
-        allowed, reason = await self.can_start_call(lead_id)
+    async def start_call(self, lead_id: int, ignore_cooldown: bool = False) -> Call:
+        allowed, reason = await self.can_start_call(lead_id, ignore_cooldown=ignore_cooldown)
         if not allowed:
             raise CallNotAllowedError(reason)
         call = await self.call_repo.create(lead_id=lead_id, status=CallStatus.CREATED)

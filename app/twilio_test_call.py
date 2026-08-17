@@ -106,7 +106,13 @@ async def run(args: argparse.Namespace) -> int:
         lead = await _get_or_create_test_lead(session, to_number)
         call_service = CallService(session, settings)
 
-        allowed, reason = await call_service.can_start_call(lead.id)
+        # ignore_cooldown=True: dieser Testanruf wird gleich manuell mit
+        # "ja" bestaetigt (siehe unten) - der normale Cooldown zwischen zwei
+        # Anrufen desselben Leads soll fuer bewusst ausgeloeste Testanrufe
+        # nicht gelten, bleibt aber fuer Einzelanrufe/Dashboard-Testanruf/
+        # Kampagnen unveraendert aktiv (services/call_service.py). Do-Not-Call
+        # und Telefonnummer-Validierung greifen weiterhin ausnahmslos.
+        allowed, reason = await call_service.can_start_call(lead.id, ignore_cooldown=True)
         if not allowed:
             print(f"\nFEHLER: Anruf nicht erlaubt: {reason}")
             return 1
@@ -136,7 +142,7 @@ async def run(args: argparse.Namespace) -> int:
             print("Abgebrochen - kein Anruf ausgeloest.")
             return 0
 
-        call = await call_service.start_call(lead.id)
+        call = await call_service.start_call(lead.id, ignore_cooldown=True)
         webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
 
         try:

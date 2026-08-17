@@ -358,10 +358,22 @@ schnellere, aber synthetischer klingende Alternative bestehen
     `phone/twilio_media_handler.py`, Stille-Timeout -> `EndpointDetector`)
     und `services/call_service.py::CallService._effective_call_cooldown`
     (liest direkt ueber `self.session`, gilt daher automatisch fuer JEDEN
-    Call-Startpfad: Einzelanruf, Testanruf, Kampagne). Wie bei Prompt-Version
-    und Stimme gilt: ein bereits laufendes Gespraech behaelt seine beim Start
+    Call-Startpfad: Einzelanruf, Dashboard-Testanruf, Kampagne - mit einer
+    bewussten Ausnahme, siehe naechster Punkt). Wie bei Prompt-Version und
+    Stimme gilt: ein bereits laufendes Gespraech behaelt seine beim Start
     gepinnten Werte, ein NEUER Call bekommt automatisch die zuletzt im
     Dashboard gespeicherten Werte - kein Backend-Neustart noetig.
+  - **Cooldown-Ausnahme fuer `app/twilio_test_call.py`**: manuell mit "ja"
+    bestaetigte CLI-Testanrufe umgehen den Cooldown bewusst
+    (`CallService.can_start_call`/`start_call(..., ignore_cooldown=True)`),
+    damit ein Testanruf nicht am Cooldown desselben Test-Leads aus einem
+    vorherigen Testlauf scheitert. Gilt ausschliesslich fuer diesen einen
+    Aufrufer - Einzelanruf (`api/calls.py`), Dashboard-Testanruf
+    (`api/telephony.py`) und Kampagnen (`services/campaign_service.py`)
+    lassen das Argument bewusst weg und bleiben vom Cooldown unveraendert
+    betroffen. Do-Not-Call und Telefonnummer-Validierung bleiben von
+    `ignore_cooldown` in jedem Fall unberuehrt (siehe
+    `tests/test_call_status.py::test_ignore_cooldown_still_respects_do_not_call`).
   - **"Sind Sie noch da?" bei Wartezeit-Ablauf neu gebaut**
     (`agent/dario.py::Dario.check_wait_timeout`, aufgerufen aus
     `phone/twilio_media_handler.py`'s Hauptschleife nach jeder ergebnislosen
