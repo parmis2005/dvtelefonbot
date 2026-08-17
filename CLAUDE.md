@@ -250,3 +250,15 @@ schnellere, aber synthetischer klingende Alternative bestehen
   `app/twilio_test_call.py` warnt seither vor dem Bestaetigungs-Prompt, wenn
   `--to` mit `TWILIO_CALLER_ID` uebereinstimmt. Fuer echte Tests eine andere
   Zielnummer als die Caller-ID verwenden.
+- **`<Stream>`-URL-Query-Parameter werden von Twilio nicht zuverlaessig
+  durchgereicht**: ein Testanruf klingelte, wurde beim Abheben aber sofort
+  wieder beendet (Twilio-Debugger-Fehler 31920 "Stream - WebSocket -
+  Handshake Error"). Ursache: `call_id` stand nur als `?call_id=...` in der
+  `<Stream url="...">`, Twilio schickte beim WebSocket-Verbindungsaufbau
+  aber keinen Query-String mit - unser Server lehnte die Verbindung mangels
+  Pflichtparameter mit 403 ab, bevor Dario ueberhaupt antworten konnte.
+  Behoben durch ein `<Parameter name="call_id" .../>`-Element (offizieller
+  Twilio-Mechanismus, kommt zuverlaessig im "start"-Event als
+  `customParameters` an) - siehe `phone/twilio_voice.py::build_connect_stream_twiml`
+  und `api/twilio.py::_await_start_event`. Die URL behaelt den Query-Parameter
+  zusaetzlich als harmlosen Fallback.

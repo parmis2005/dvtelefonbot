@@ -71,12 +71,21 @@ class TwilioProvider:
         return self._validator.validate(url, params, signature)
 
     @staticmethod
-    def build_connect_stream_twiml(websocket_url: str) -> str:
+    def build_connect_stream_twiml(websocket_url: str, call_id: int) -> str:
         """TwiML, das den Anruf an eine bidirektionale Media-Stream-WebSocket
         uebergibt - darueber laeuft Darios komplette STT->Dario->TTS-Schleife
-        in Echtzeit (siehe phone/twilio_media_handler.py)."""
+        in Echtzeit (siehe phone/twilio_media_handler.py).
+
+        call_id wird bewusst als <Parameter> statt als URL-Query-String
+        uebergeben: Twilio reicht Query-Parameter in der Stream-URL nicht
+        zuverlaessig durch (fuehrte zu Fehler 31920 "WebSocket Handshake
+        Error", weil unser Server die fehlende call_id ablehnte) - offiziell
+        empfohlener Weg sind <Parameter>-Elemente, die Twilio im "start"-
+        Event als customParameters an die WebSocket liefert.
+        """
         response = VoiceResponse()
         connect = Connect()
-        connect.stream(url=websocket_url)
+        stream = connect.stream(url=websocket_url)
+        stream.parameter(name="call_id", value=str(call_id))
         response.append(connect)
         return str(response)

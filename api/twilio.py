@@ -17,6 +17,8 @@ akzeptiert.
 
 from __future__ import annotations
 
+import json
+
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -76,11 +78,14 @@ async def twilio_voice_webhook(request: Request, call_id: int = Query(...)) -> R
     await _validate_twilio_request(request, form)
 
     settings = get_settings()
+    # call_id steht zusaetzlich als Query-Param in der URL (guenstiger,
+    # harmloser Fallback), massgeblich ist aber das <Parameter>-Element -
+    # siehe TwilioProvider.build_connect_stream_twiml fuer den Hintergrund.
     ws_url = (
         settings.twilio_public_base_url.replace("https://", "wss://").replace("http://", "ws://")
         + f"/twilio/media-stream?call_id={call_id}"
     )
-    twiml = TwilioProvider.build_connect_stream_twiml(ws_url)
+    twiml = TwilioProvider.build_connect_stream_twiml(ws_url, call_id)
     logger.info("TwiML-Webhook fuer Call %s ausgeliefert (Stream: %s)", call_id, ws_url)
     return Response(content=twiml, media_type="application/xml")
 
@@ -118,9 +123,48 @@ async def twilio_status_webhook(request: Request, call_id: int = Query(...)) -> 
     return {"ok": True}
 
 
+async def _await_start_event(websocket: WebSocket) -> dict:
+    """Liest WebSocket-Nachrichten, bis das "start"-Event kommt, und gibt es
+    zurueck. call_id kommt aus <Parameter> (customParameters), NICHT aus der
+    URL-Query - Twilio reicht Query-Parameter in der Stream-URL nicht
+    zuverlaessig durch (Fehler 31920 "WebSocket Handshake Error")."""
+    while True:
+        raw = await websocket.receive_text()
+        msg = json.loads(raw)
+        if msg.get("event") == "start":
+            return msg
+        if msg.get("event") == "connected":
+            continue
+
+
 @router.websocket("/media-stream")
-async def twilio_media_stream(websocket: WebSocket, call_id: int = Query(...)) -> None:
+async def twilio_media_stream(websocket: WebSocket) -> None:
     await websocket.accept()
+
+    try:
+        start_msg = await _await_start_event(websocket)
+    except WebSocketDisconnect:
+        logger.info("Media Stream vor dem start-Event getrennt.")
+        return
+
+    start = start_msg["start"]
+    custom_params = start.get("customParameters", {})
+    call_id_raw = custom_params.get("call_id") or websocket.query_params.get("call_id")
+    if call_id_raw is None:
+        logger.error(
+            "Media Stream ohne call_id (weder customParameters noch Query) - "
+            "schliesse Verbindung. start-Event: %s",
+            start,
+        )
+        await websocket.close(code=4400)
+        return
+    call_id = int(call_id_raw)
+    stream_sid = start["streamSid"]
+    twilio_call_sid = start.get("callSid")
+    logger.info(
+        "Twilio Media Stream gestartet: call_id=%s streamSid=%s callSid=%s",
+        call_id, stream_sid, twilio_call_sid,
+    )
 
     settings = get_settings()
     ctx = build_app_context()
@@ -155,6 +199,8 @@ async def twilio_media_stream(websocket: WebSocket, call_id: int = Query(...)) -
             stt=stt,
             tts=tts,
             twilio_provider=twilio_provider,
+            stream_sid=stream_sid,
+            twilio_call_sid=twilio_call_sid,
         )
         try:
             await session_handler.run()

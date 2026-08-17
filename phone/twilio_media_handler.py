@@ -50,6 +50,8 @@ class TwilioMediaStreamSession:
         stt: SpeechToTextProvider,
         tts: TextToSpeechProvider,
         twilio_provider: TwilioProvider,
+        stream_sid: str | None = None,
+        twilio_call_sid: str | None = None,
         silence_timeout_ms: int = 900,
         max_utterance_seconds: float = 20.0,
     ):
@@ -63,8 +65,12 @@ class TwilioMediaStreamSession:
         self.silence_timeout_ms = silence_timeout_ms
         self.max_utterance_seconds = max_utterance_seconds
 
-        self.stream_sid: str | None = None
-        self.call_sid: str | None = None
+        # Werden ueblicherweise vom Aufrufer schon aus dem "start"-Event
+        # herausgelesen uebergeben (siehe api/twilio.py), da dort auch die
+        # call_id daraus bestimmt werden muss (Twilio reicht Query-Parameter
+        # in der Stream-URL nicht zuverlaessig durch - Fehler 31920).
+        self.stream_sid: str | None = stream_sid
+        self.call_sid: str | None = twilio_call_sid
         self._inbound_buffer: list[np.ndarray] = []
         self._vad = VoiceActivityDetector(aggressiveness=2)
         self._endpoint = EndpointDetector(EndpointConfig(silence_timeout_ms=silence_timeout_ms))
@@ -78,7 +84,10 @@ class TwilioMediaStreamSession:
 
     async def run(self) -> None:
         try:
-            await self._wait_for_start()
+            if self.stream_sid is None:
+                await self._wait_for_start()
+            else:
+                await self.call_service.mark_answered(self.call_id)
             opening = self.dario.opening_line()
             await self._speak(opening)
 
