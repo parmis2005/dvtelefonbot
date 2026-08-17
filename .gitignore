@@ -28,6 +28,11 @@ models/
 *.bin
 *.onnx
 
+# generierte Audio-Kontrolldateien (audio_diagnostics/run_control_test.py) -
+# das Skript selbst bleibt versioniert, seine WAV/Roh-Ausgaben nicht
+audio_diagnostics/*.wav
+audio_diagnostics/*.raw
+
 .DS_Store
 .idea/
 .vscode/

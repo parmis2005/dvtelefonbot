@@ -478,3 +478,74 @@ schnellere, aber synthetischer klingende Alternative bestehen
   kompilierten Chunk: `("TURBOPACK compile-time value", "http://localhost:
   8000")`). Kompletter Login/Logout-Zyklus danach per curl mit Origin-Header
   gegen das echte laufende Backend verifiziert.
+- **Chatterbox war bei ueberlappenden Anrufen nicht nebenlaeufigkeitssicher
+  (Root-Cause-Kandidat fuer "Rauschen statt Sprache")**: `ChatterboxTTSProvider`
+  ist prozessweit gecacht und wird von ALLEN gleichzeitigen Anrufen geteilt
+  (`app/bootstrap.py::get_tts_provider`). Chatterbox' `generate()` ruft bei
+  jedem Aufruf intern `prepare_conditionals()` auf, was das GETEILTE
+  Modell-Attribut `self.conds` ueberschreibt statt einen per-Aufruf-Zustand zu
+  verwenden - lief `synthesize()` fuer zwei Anrufe zeitlich ueberlappend
+  (z.B. zwei Kampagnen-Calls, deren TTS-Antworten kurz gegeneinander
+  versetzt eintrafen), konnte der zweite Aufruf die Konditionierung des
+  ersten MITTEN in dessen Generierung ueberschreiben - beobachtbares Symptom
+  auf der Leitung: verzerrtes/rauschendes statt verstaendliches Audio. Ein rein
+  lokaler Einzelanruf-Test zeigt das nicht (kein zweiter ueberlappender
+  Aufruf), weshalb der Fehler bei einem isolierten Testanruf nicht zwingend
+  auftritt, aber im echten Mehr-Anrufe-Betrieb (Abschnitt "10 parallele
+  Gespraeche") reproduzierbar waere. Behoben durch einen
+  `asyncio.Lock` (`ChatterboxTTSProvider._generate_lock`), der alle
+  `generate()`-Aufrufe auf demselben Modell serialisiert - CPU-gebunden ohnehin
+  nicht sinnvoll parallelisierbar. Mit `tests/test_chatterbox_concurrency.py`
+  verifiziert (ein Fake-Modell erkennt und meldet einen gleichzeitigen
+  Eintritt in `generate()`; der Test wurde durch testweises Entfernen des
+  Locks als tatsaechlich wirksam bestaetigt, statt sich nur auf die
+  Code-Lektuere zu verlassen).
+  **Wichtige Konsequenz fuer 10 parallele Gespraeche**: der Lock macht
+  gleichzeitige TTS-Anfragen KORREKT statt gleichzeitig SCHNELL - bei mehreren
+  Anrufen, deren Antworten zeitlich zusammenfallen, wird Chatterbox pro
+  Aeusserung (~25-40s auf dieser CPU-only-Hardware, siehe naechster Punkt)
+  strikt nacheinander abgearbeitet, nicht parallel. Bei einem echten Burst von
+  bis zu 10 gleichzeitigen Anrufen kann sich das auf mehrere Minuten
+  Wartezeit fuer spaete Anrufe aufsummieren. Das ist der korrekte Trade-off
+  (verstaendliches, aber wartendes Audio statt schnelles, aber korruptes
+  Audio), loest aber nicht das grundsaetzliche, bereits weiter oben
+  dokumentierte Latenzproblem von Chatterbox auf CPU - fuer echten
+  telefonietauglichen Mehr-Anrufe-Betrieb bleibt GPU-Beschleunigung,
+  ein kleineres/schnelleres Modell oder mehrere unabhaengige Modell-Instanzen
+  (z.B. ein Prozess/Modell pro gleichzeitigem Anruf statt ein geteiltes
+  Singleton) ein offener Punkt.
+- **Lokaler Audio-Kontrolltest bestaetigt: der Audio-AUSGABEPFAD selbst
+  (Chatterbox -> float32-WAV -> Resampling auf 8kHz -> mu-law -> Twilio-
+  Frames) ist korrekt** (siehe `audio_diagnostics/run_control_test.py`,
+  erzeugt und archiviert ein reales TTS-Ergebnis mit der aktiven
+  Dario-Stimme, die exakt fuer Twilio konvertierte mu-law-Version und eine
+  hoerbare Rueckkonvertierung): bei einem echten Lauf mit der Begruessung
+  lag der mu-law-Roundtrip-SNR bei 37.4 dB (typisch fuer G.711: 35-38 dB,
+  also kein Qualitaetsverlust ueber das fuer Telefonie inhaerente Mass
+  hinaus) und nur 4 von 188.160 Samples lagen minimal (Peak 1.06) ueber
+  Vollausschlag. Die eigene mu-law-Kodierung (`voice/codecs.py`) wurde
+  zusaetzlich gegen Pythons Referenzimplementierung `audioop.lin2ulaw`/
+  `ulaw2lin` verifiziert (< 1% Abweichung, jeweils hoechstens eine
+  Quantisierungsstufe, reine Rundungsdifferenzen an Segmentgrenzen - siehe
+  `tests/test_twilio_audio_format.py`). Der Codec/Resampling-Pfad ist damit
+  als Root Cause fuer gemeldetes "Rauschen statt Sprache" ausgeschlossen;
+  der oben dokumentierte Nebenlaeufigkeits-Bug ist der einzige im Code
+  gefundene, tatsaechlich reproduzierbare Kandidat dafuer.
+- **Barge-In auf dem echten Twilio-Media-Stream-Pfad war bisher ungetestet**:
+  `tests/test_barge_in.py` deckt nur `voice/barge_in.py::BargeInController`
+  ab (nur fuer `app/local_voice_test.py`, den Mikrofon-Pfad, relevant) - der
+  fuer Twilio tatsaechlich verwendete, komplett separate Mechanismus
+  (`phone/twilio_media_handler.py::TwilioMediaStreamSession._receive_loop` /
+  `_process_vad_frames` / `_send_clear`, siehe "Barge-In war faktisch tot"
+  weiter oben) hatte keinen End-to-End-Test ueber den echten
+  `/twilio/voice` -> `/twilio/media-stream`-Pfad. Neu:
+  `tests/test_twilio_barge_in_e2e.py` verifiziert ueber den echten Pfad,
+  dass eine waehrend Darios Sprachausgabe eintreffende "media"-Nachricht (a)
+  vom durchgehend laufenden Empfangs-Task erkannt wird, (b) ein "clear"-
+  Event an Twilio ausloest, (c) die Wiedergabe nachweislich VORZEITIG
+  abbricht (deutlich weniger Frames als bei vollstaendiger Wiedergabe), und
+  (d) das Gespraech danach normal weiterlaeuft (STT/Antwort/end_call
+  funktionieren weiter). Ergaenzend stellt eine neue Assertion im
+  bestehenden `test_full_call_greeting_turn_and_natural_farewell` sicher,
+  dass reine Stille (echte WebRTC-VAD, nicht gemockt) KEIN falsches
+  Barge-In (kein "clear"-Event) ausloest.

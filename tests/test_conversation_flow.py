@@ -147,3 +147,44 @@ async def test_no_farewell_loop_second_farewell_not_processed_by_dario():
     assert result.should_end_call is True
     # keine zweite Verabschiedung/Wiederholung im selben Text
     assert result.reply_text.count("Wiederhoeren") == 1
+
+
+@pytest.mark.asyncio
+async def test_farewell_after_confirmed_contact_uses_success_closing():
+    """Regression: CallState.SUCCESS und agent/responses.py::success_closing()
+    (Abschnitt 71 - erklaert die naechsten Schritte statt nur generisch
+    'Auf Wiederhoeren' zu sagen) waren zuvor unerreichbarer Code - die
+    Kontaktbestaetigung (Intent.AFFIRMATION bei ausstehendem Kontaktwert,
+    siehe agent/conversation.py) setzte zwar `contact_confirmed`, aber keine
+    nachfolgende Verabschiedung nutzte das jemals aus."""
+    engine = make_engine()
+    ctx = make_context(state=CallState.CONTACT_CAPTURE)
+    ctx.contact_value_pending = "kunde@beispiel.de"
+    ctx.preferred_contact = "EMAIL"
+
+    confirm_result = await engine.handle_utterance(ctx, "Ja, das passt so.")
+    assert ctx.contact_confirmed is True
+    assert confirm_result.ready_to_send_email is True
+
+    ctx.design_sent = True  # simuliert: tools.send_email lieferte success=True
+    farewell_result = await engine.handle_utterance(ctx, "Vielen Dank, auf Wiederhoeren.")
+
+    assert farewell_result.should_end_call is True
+    assert farewell_result.reply_text == engine.responses.success_closing(True)
+    assert farewell_result.reply_text != "Vielen Dank. Auf Wiederhoeren."
+    assert ctx.state == CallState.GOODBYE
+    assert ctx.previous_state == CallState.SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_farewell_without_confirmed_contact_still_uses_generic_reply():
+    """Gegenprobe: ohne bestaetigten Kontakt bleibt die bisherige, generische
+    Verabschiedung unveraendert - success_closing() ist nur fuer den
+    tatsaechlichen Erfolgsfall gedacht."""
+    engine = make_engine()
+    ctx = make_context()
+
+    result = await engine.handle_utterance(ctx, "Vielen Dank, auf Wiederhoeren.")
+
+    assert result.reply_text == "Vielen Dank. Auf Wiederhoeren."
+    assert ctx.state == CallState.GOODBYE

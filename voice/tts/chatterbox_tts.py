@@ -64,6 +64,17 @@ class ChatterboxTTSProvider(TextToSpeechProvider):
         self.reference_audio_path = reference_audio_path
         self._model = None  # lazy geladen, einmal pro Prozess wiederverwendet
         self._load_lock = asyncio.Lock()
+        # Chatterbox' generate() ruft bei jedem Aufruf intern prepare_conditionals()
+        # auf, was das GETEILTE Modell-Attribut self.conds ueberschreibt (kein
+        # per-Aufruf-Zustand). Bei mehreren gleichzeitigen Anrufen (bis zu 10
+        # parallele Kampagnen-Calls teilen sich denselben prozessweit gecachten
+        # Provider, siehe app/bootstrap.py::get_tts_provider) wuerde ein zweiter,
+        # ueberlappender synthesize()-Aufruf die Konditionierung des ersten
+        # mitten in dessen Generierung ueberschreiben - beobachtbares Symptom:
+        # verzerrtes/rauschendes Audio. Dieser Lock serialisiert alle
+        # generate()-Aufrufe auf demselben Modell (CPU-gebunden ohnehin nicht
+        # sinnvoll parallelisierbar) und macht sie dadurch sicher.
+        self._generate_lock = asyncio.Lock()
 
     async def is_available(self) -> bool:
         if importlib.util.find_spec("chatterbox") is None:
@@ -147,28 +158,31 @@ class ChatterboxTTSProvider(TextToSpeechProvider):
         loop = asyncio.get_event_loop()
 
         last_wav = None
-        for attempt in range(self.max_attempts):
-            seed = random.randint(0, 2**31 - 1)
-            wav = await loop.run_in_executor(None, self._generate_sync, model, clean_text, seed)
-            last_wav = wav
-            if self._is_plausible(wav, model.sr, clean_text):
-                if attempt > 0:
-                    logger.info(
-                        "Chatterbox-Ausgabe erst nach %d Versuch(en) plausibel.", attempt + 1
-                    )
-                break
-            logger.warning(
-                "Chatterbox-Ausgabe (Versuch %d/%d) wirkte unplausibel (Stille/Laenge) - "
-                "erzeuge neu.",
-                attempt + 1,
-                self.max_attempts,
-            )
-        else:
-            logger.warning(
-                "Chatterbox lieferte nach %d Versuchen kein eindeutig plausibles Ergebnis - "
-                "verwende letzten Versuch.",
-                self.max_attempts,
-            )
+        async with self._generate_lock:
+            for attempt in range(self.max_attempts):
+                seed = random.randint(0, 2**31 - 1)
+                wav = await loop.run_in_executor(
+                    None, self._generate_sync, model, clean_text, seed
+                )
+                last_wav = wav
+                if self._is_plausible(wav, model.sr, clean_text):
+                    if attempt > 0:
+                        logger.info(
+                            "Chatterbox-Ausgabe erst nach %d Versuch(en) plausibel.", attempt + 1
+                        )
+                    break
+                logger.warning(
+                    "Chatterbox-Ausgabe (Versuch %d/%d) wirkte unplausibel (Stille/Laenge) - "
+                    "erzeuge neu.",
+                    attempt + 1,
+                    self.max_attempts,
+                )
+            else:
+                logger.warning(
+                    "Chatterbox lieferte nach %d Versuchen kein eindeutig plausibles Ergebnis - "
+                    "verwende letzten Versuch.",
+                    self.max_attempts,
+                )
 
         await loop.run_in_executor(None, torchaudio.save, output_path, last_wav, model.sr)
         return output_path

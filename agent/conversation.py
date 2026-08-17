@@ -105,8 +105,21 @@ class ConversationEngine:
 
         # Verabschiedung - keine Schleife
         if decision.ask_farewell_reply:
-            context.transition_to(CallState.GOODBYE)
-            reply = r.farewell_reply()
+            if context.contact_confirmed:
+                # Erfolgreicher Abschluss (Abschnitt 71, agent/responses.py::
+                # success_closing) statt der generischen Verabschiedung -
+                # der Zustandsuebergang ueber SUCCESS wird nur versucht, wenn
+                # er von hier aus erlaubt ist (siehe agent/state_machine.py);
+                # GOODBYE selbst ist von jedem Nicht-Terminalzustand aus
+                # immer erlaubt, der Text haengt aber allein an
+                # contact_confirmed, nicht am erreichten Zustand.
+                if context.state in (CallState.CONTACT_CAPTURE, CallState.CALLBACK_REQUEST):
+                    context.transition_to(CallState.SUCCESS)
+                context.transition_to(CallState.GOODBYE)
+                reply = r.success_closing(context.design_sent)
+            else:
+                context.transition_to(CallState.GOODBYE)
+                reply = r.farewell_reply()
             return EngineResult(reply_text=reply, should_end_call=True)
 
         if nlu.has(Intent.FRIENDLY_WISH):
