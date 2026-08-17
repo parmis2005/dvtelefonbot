@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/*
+ * Digital Vision Design System
+ * ------------------------------------------------------------------
+ * Werte real extrahiert aus https://www.digitalvision.site/ (Space Grotesk +
+ * Inter Typografie-Paarung, Radius-Skala, Schatten-Sprache, Akzentfarben-
+ * Familie cyan/coral/violet/gold, negative Letter-Spacing bei Headlines,
+ * positive Letter-Spacing bei Uppercase-Labels). Die Marken-DNA (Fonts,
+ * Radien, Schatten, Akzentfarben) ist identisch zur Marketing-Seite - die
+ * Seite selbst ist dunkel/glowing, das Dashboard ist bewusst HELL (siehe
+ * Auftrag: "hell, hochwertig, elegant, ruhig"), daher wird die DNA hier auf
+ * einen hellen Hintergrund uebersetzt statt 1:1 kopiert.
+ */
+:root {
+  --dv-background: #f6f8fb;
+  --dv-surface: #ffffff;
+  --dv-surface-secondary: #eef2f7;
+  --dv-surface-hover: #f1f5f9;
+
+  --dv-text-primary: #0b1220;
+  --dv-text-secondary: #45536b;
+  --dv-text-muted: #8291a8;
+  --dv-text-inverse: #f8fbff;
+
+  /* Direkt aus der Digital-Vision-Palette uebernommen (siehe --violet/--gold/
+     --coral/--cyan in der Live-Site-CSS). */
+  --dv-accent: #8b3ffb;
+  --dv-accent-hover: #7326e6;
+  --dv-accent-soft: rgba(139, 63, 251, 0.1);
+  --dv-accent-warm: #e2a53a;
+  --dv-accent-warm-soft: rgba(226, 165, 58, 0.12);
+  --dv-accent-cyan: #1596b8;
+  --dv-accent-cyan-soft: rgba(21, 150, 184, 0.1);
+  --dv-danger: #e0604a;
+  --dv-danger-soft: rgba(224, 96, 74, 0.1);
+  --dv-success: #1a9c6b;
+  --dv-success-soft: rgba(26, 156, 107, 0.1);
+
+  --dv-border: rgba(11, 18, 32, 0.09);
+  --dv-border-subtle: rgba(11, 18, 32, 0.055);
+  --dv-border-strong: rgba(11, 18, 32, 0.16);
+
+  --dv-radius-small: 10px;
+  --dv-radius-medium: 16px;
+  --dv-radius-large: 22px;
+  --dv-radius-pill: 999px;
+
+  --dv-shadow-small: 0 1px 2px rgba(11, 18, 32, 0.05), 0 1px 1px rgba(11, 18, 32, 0.04);
+  --dv-shadow-medium: 0 12px 28px rgba(11, 18, 32, 0.08), 0 2px 8px rgba(11, 18, 32, 0.04);
+  --dv-shadow-large: 0 24px 48px rgba(11, 18, 32, 0.1), 0 4px 12px rgba(11, 18, 32, 0.05);
+  --dv-shadow-accent: 0 0 0 3px var(--dv-accent-soft);
+
+  --dv-spacing-xs: 4px;
+  --dv-spacing-sm: 8px;
+  --dv-spacing-md: 16px;
+  --dv-spacing-lg: 24px;
+  --dv-spacing-xl: 40px;
+
+  --dv-container-width: 1280px;
+
+  --dv-font-display: var(--font-space-grotesk), "Space Grotesk", sans-serif;
+  --dv-font-body: var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+
+  --dv-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --dv-transition-fast: 140ms var(--dv-ease);
+  --dv-transition-medium: 220ms var(--dv-ease);
+}
+
+@theme inline {
+  --color-dv-background: var(--dv-background);
+  --color-dv-surface: var(--dv-surface);
+  --color-dv-surface-secondary: var(--dv-surface-secondary);
+  --color-dv-surface-hover: var(--dv-surface-hover);
+  --color-dv-text-primary: var(--dv-text-primary);
+  --color-dv-text-secondary: var(--dv-text-secondary);
+  --color-dv-text-muted: var(--dv-text-muted);
+  --color-dv-text-inverse: var(--dv-text-inverse);
+  --color-dv-accent: var(--dv-accent);
+  --color-dv-accent-hover: var(--dv-accent-hover);
+  --color-dv-accent-soft: var(--dv-accent-soft);
+  --color-dv-accent-warm: var(--dv-accent-warm);
+  --color-dv-accent-warm-soft: var(--dv-accent-warm-soft);
+  --color-dv-accent-cyan: var(--dv-accent-cyan);
+  --color-dv-accent-cyan-soft: var(--dv-accent-cyan-soft);
+  --color-dv-danger: var(--dv-danger);
+  --color-dv-danger-soft: var(--dv-danger-soft);
+  --color-dv-success: var(--dv-success);
+  --color-dv-success-soft: var(--dv-success-soft);
+  --color-dv-border: var(--dv-border);
+  --color-dv-border-subtle: var(--dv-border-subtle);
+  --color-dv-border-strong: var(--dv-border-strong);
+
+  --radius-dv-sm: var(--dv-radius-small);
+  --radius-dv-md: var(--dv-radius-medium);
+  --radius-dv-lg: var(--dv-radius-large);
+  --radius-dv-pill: var(--dv-radius-pill);
+
+  --shadow-dv-sm: var(--dv-shadow-small);
+  --shadow-dv-md: var(--dv-shadow-medium);
+  --shadow-dv-lg: var(--dv-shadow-large);
+
+  --font-display: var(--dv-font-display);
+  --font-sans: var(--dv-font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--dv-background);
+  color: var(--dv-text-primary);
+  font-family: var(--dv-font-body);
+  font-feature-settings: "cv11", "ss01";
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--dv-font-display);
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+.dv-eyebrow {
+  font-family: var(--dv-font-body);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dv-text-muted);
+}
+
+::selection {
+  background: var(--dv-accent-soft);
+  color: var(--dv-text-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--dv-accent);
+  outline-offset: 2px;
+}

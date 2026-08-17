@@ -88,14 +88,16 @@ EOF
 fi
 
 mkdir -p "$PROJECT_ROOT/models/whisper"
-if [ ! -f "$PROJECT_ROOT/models/whisper/ggml-small.bin" ]; then
+if [ ! -f "$PROJECT_ROOT/models/whisper/ggml-medium.bin" ]; then
     warn "Kein Whisper-Modell in models/whisper/ gefunden."
-    if confirm "Mehrsprachiges Whisper-Modell (small, ~488MB, guter Kompromiss aus Geschwindigkeit/Genauigkeit fuer Deutsch) jetzt herunterladen?"; then
-        curl -L -o "$PROJECT_ROOT/models/whisper/ggml-small.bin" \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+    if confirm "Mehrsprachiges Whisper-Modell (medium, ~1.5GB) jetzt herunterladen?"; then
+        curl -L -o "$PROJECT_ROOT/models/whisper/ggml-medium.bin" \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
     fi
-    echo "   Fuer hoehere Genauigkeit (langsamer) alternativ 'medium' (~1.5GB):"
-    echo "     curl -L -o models/whisper/ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+    echo "   medium ist bewusst der Standard: small erkennt am Telefon (8kHz)"
+    echo "   diktierte E-Mail-Adressen unzuverlaessig. Fuer schnellere, aber"
+    echo "   ungenauere Antworten alternativ 'small' (~488MB):"
+    echo "     curl -L -o models/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
 fi
 
 # --- llama.cpp ------------------------------------------------------------

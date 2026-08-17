@@ -5,11 +5,13 @@ und Telefonie-Pfad: baut Settings, Provider und die Conversation Engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.conversation import ConversationEngine
 from core.config import BusinessConfig, Settings, get_business_config, get_settings
 from core.logging import configure_logging
+from database.repository import VoiceProfileRepository
 from llm.base import LLMProvider
 from llm.local_llama import LocalLlamaProvider
 from tools.base import EmailProvider, WhatsAppProvider
@@ -77,17 +79,73 @@ def build_tts_provider(settings: Settings) -> TextToSpeechProvider:
     raise ValueError(f"Unbekannter TTS_PROVIDER: {settings.tts_provider}")
 
 
-@lru_cache
-def get_tts_provider() -> TextToSpeechProvider:
+_tts_provider_cache: dict[tuple, TextToSpeechProvider] = {}
+
+
+def _tts_signature(settings: Settings, reference_audio_path: str | None,
+                    exaggeration: float, cfg_weight: float, temperature: float) -> tuple:
+    return (
+        settings.tts_provider,
+        reference_audio_path or "",
+        round(exaggeration, 4),
+        round(cfg_weight, 4),
+        round(temperature, 4),
+    )
+
+
+async def get_tts_provider(session: AsyncSession | None = None) -> TextToSpeechProvider:
     """Prozessweit wiederverwendete TTS-Provider-Instanz.
 
-    Wichtig fuer Chatterbox: das Modell (~2GB) wird beim ersten Gebrauch
-    lazy geladen und danach in der Provider-Instanz zwischengehalten (siehe
-    voice/tts/chatterbox_tts.py::_get_model). Wuerde bei jedem Anruf eine neue
-    Provider-Instanz gebaut, muesste das Modell fuer JEDEN Call neu geladen
-    werden - hier daher bewusst gecacht statt bei jedem Request neu gebaut.
+    Beruecksichtigt die in der Datenbank als aktiv markierte
+    database/models.py::VoiceProfile (siehe Abschnitt 22 der Dashboard-Spec:
+    "Stimme aktivieren" wirkt sofort auf alle kommenden Anrufe, ohne
+    Backend-Neustart). Ohne aktives VoiceProfile (z.B. frische Installation)
+    gelten die Chatterbox-Werte aus .env als Fallback.
+
+    Pro (Referenzstimme, Parameter)-Kombination wird genau eine Provider-
+    Instanz zwischengehalten, damit ein aktiviertes Voice-Profil das
+    Chatterbox-Modell (~2GB) nicht bei jedem Call neu laedt (siehe
+    voice/tts/chatterbox_tts.py::_get_model) - ein Wechsel der aktiven
+    Stimme baut dagegen automatisch eine neue Instanz mit der neuen
+    Referenzaufnahme.
     """
-    return build_tts_provider(get_settings())
+    settings = get_settings()
+
+    reference_audio_path = settings.chatterbox_reference_audio_path or None
+    exaggeration = settings.chatterbox_exaggeration
+    cfg_weight = settings.chatterbox_cfg_weight
+    temperature = settings.chatterbox_temperature
+
+    if session is not None and settings.tts_provider == "chatterbox":
+        active_voice = await VoiceProfileRepository(session).get_active()
+        if active_voice is not None:
+            reference_audio_path = None if active_voice.is_builtin else (active_voice.file_path or None)
+            exaggeration = active_voice.exaggeration
+            cfg_weight = active_voice.cfg_weight
+            temperature = active_voice.temperature
+
+    signature = _tts_signature(settings, reference_audio_path, exaggeration, cfg_weight, temperature)
+    cached = _tts_provider_cache.get(signature)
+    if cached is not None:
+        return cached
+
+    if settings.tts_provider == "chatterbox":
+        from voice.tts.chatterbox_tts import ChatterboxTTSProvider
+
+        provider: TextToSpeechProvider = ChatterboxTTSProvider(
+            language=settings.chatterbox_language,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+            temperature=temperature,
+            device=settings.chatterbox_device,
+            max_attempts=settings.chatterbox_max_attempts,
+            reference_audio_path=reference_audio_path,
+        )
+    else:
+        provider = build_tts_provider(settings)
+
+    _tts_provider_cache[signature] = provider
+    return provider
 
 
 def build_app_context() -> AppContext:

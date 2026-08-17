@@ -41,7 +41,8 @@ def build_lead_summary(context: ConversationContext) -> str:
 
 
 def build_messages(context: ConversationContext, user_utterance: str) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": load_system_prompt()}]
+    system_prompt = context.system_prompt or load_system_prompt()
+    messages = [{"role": "system", "content": system_prompt}]
     messages.append({"role": "system", "content": build_lead_summary(context)})
 
     recent = context.history[-MAX_HISTORY_TURNS:]

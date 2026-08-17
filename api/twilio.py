@@ -185,7 +185,7 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
         stt = LocalWhisperProvider(
             settings.whisper_cpp_binary, settings.whisper_model_path, settings.whisper_language
         )
-        tts = get_tts_provider()
+        tts = await get_tts_provider(session)
         twilio_provider = TwilioProvider(
             settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_caller_id
         )
@@ -206,3 +206,13 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             await session_handler.run()
         except WebSocketDisconnect:
             logger.info("Twilio Media Stream (Call %s) getrennt.", call_id)
+        else:
+            # Session normal beendet (Gespraech regulaer abgeschlossen) -
+            # WebSocket explizit sauber schliessen statt den Verbindungsabbau
+            # implizit dem ASGI-Server zu ueberlassen, sonst kommt bei
+            # manchen Clients ein abrupter Verbindungsabbruch statt eines
+            # regulaeren Close-Handshakes an.
+            try:
+                await websocket.close()
+            except RuntimeError:
+                pass  # bereits getrennt

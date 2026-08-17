@@ -47,27 +47,61 @@ Fassade wie Asterisk, ohne dass an `agent/*` etwas geaendert wurde.
 fuer Twilio) genutzt. Keine separate vereinfachte Logik fuer Tests.
 
 **TTS-Provider sind prozessweit gecacht** (`app/bootstrap.py::get_tts_provider`,
-`@lru_cache`): wichtig fuer Chatterbox, dessen ~2GB-Modell sonst bei jedem
-einzelnen Anruf neu geladen wuerde. Bei Aenderungen an dieser Cache-Logik
-immer pruefen, dass ein neuer Anruf nicht erneut das volle Modell laedt.
+Signatur-basierter Dict-Cache statt `@lru_cache`, da DB-abhaengig - siehe
+naechster Absatz): wichtig fuer Chatterbox, dessen ~2GB-Modell sonst bei
+jedem einzelnen Anruf neu geladen wuerde. Bei Aenderungen an dieser
+Cache-Logik immer pruefen, dass ein neuer Anruf nicht erneut das volle
+Modell laedt.
+
+**Prompt-Version und Stimme sind DB-gesteuert, ohne Neustart wirksam**:
+`agent/dario.py::Dario.for_lead` liest bei jedem Call-Start die aktive
+`database/models.py::PromptVersion` und pinnt ihren Inhalt einmalig in
+`agent/context.py::ConversationContext.system_prompt` - ein bereits
+laufendes Gespraech wechselt dadurch nie mitten im Gespraech die Version,
+ein NEUER Call bekommt automatisch die zuletzt im Dashboard gespeicherte
+Version. Analog liest `app/bootstrap.py::get_tts_provider(session)` das
+aktive `database/models.py::VoiceProfile` (Referenzaufnahme + exaggeration/
+cfg_weight/temperature) und cached pro Parameter-Kombination eine eigene
+Chatterbox-Instanz. Ohne aktive DB-Zeile (frische Installation) gelten die
+`.env`-Werte als Fallback.
 
 **Verzeichnisstruktur** (siehe auch README.md):
 ```
 app/        Einstiegspunkte: main.py (FastAPI), chat_test.py, local_voice_test.py, bootstrap.py
 agent/      Conversation Engine, State Machine, Business Rules, Guardrails, NLU, Response-Templates
-core/       Config (.env + config.yaml) und Logging
-prompts/    LLM-Systemprompt (nur fuer nicht-sicherheitskritische, offene Gespraechsteile)
+core/       Config (.env + config.yaml), Logging, Dashboard-Auth (core/auth.py)
+prompts/    LLM-Systemprompt (nur fuer nicht-sicherheitskritische, offene Gespraechsteile) -
+            initialer Seed fuer database/models.py::PromptVersion, danach ist die DB massgeblich
 voice/      STT/TTS/VAD/Barge-In
 llm/        LLM-Provider-Abstraktion + lokale llama.cpp-Anbindung
-phone/      Asterisk/ARI/PJSIP, Call Controller
+phone/      Asterisk/ARI/PJSIP, Call Controller, Twilio Programmable Voice
 tools/      E-Mail, WhatsApp, Rueckruf, Do-Not-Call, zentrale Tool-Ausfuehrung
 database/   SQLAlchemy Models, Repository Layer
-services/   Lead/Call/Transcript/Summary Services (Validierung oberhalb des Repository Layers)
-api/        FastAPI-Router (Leads, Calls)
-dashboard/  Serverseitig gerendertes Web-UI (Jinja2)
+services/   Lead/Call/Transcript/Summary Services, campaign_service.py::CampaignManager
+            (Sammelanruf-Orchestrierung, siehe "Kampagnen-Engine" unten), csv_import.py
+api/        FastAPI-Router: leads, calls, campaigns, auth, prompt_versions, voices,
+            settings_api, do_not_call, telephony, twilio (Webhooks), live_status (WebSocket)
+dashboard/  Serverseitig gerendertes Basis-Web-UI (Jinja2) - fuer den taeglichen
+            Betrieb siehe stattdessen frontend/
+frontend/   DVTelefonbot Dashboard: eigenstaendige Next.js/TypeScript-App (siehe
+            README.md Abschnitt 17) - spricht das Backend als reine REST/WebSocket-
+            API an, keine eigene Gespraechslogik
 tests/      pytest-Suite
 scripts/    Setup, CSV-Import
 ```
+
+**Kampagnen-Engine** (`services/campaign_service.py::CampaignManager`):
+orchestriert Sammelanrufe mit begrenzter Parallelitaet (Default/Max ueber
+`database/models.py::AppSetting`, siehe `api/settings_api.py`) als
+In-Process-`asyncio.Task` pro Kampagne. Fuehrt Gespraeche NICHT selbst -
+jeder gestartete Anruf laeuft ueber den normalen, unabhaengigen Twilio-Pfad
+(`TwilioProvider.start_outbound_call` -> `/twilio/voice` ->
+`/twilio/media-stream`, eigene Dario-/STT-/TTS-Session pro Call). Der
+Fortschritt wird bei jedem Tick aus den `Call`-Zeilen mit passender
+`campaign_id` rekonstruiert (nicht aus In-Memory-Zustand) - ein
+Backend-Neustart setzt eine zuvor laufende Kampagne daher automatisch auf
+`PAUSED` (`CampaignManager.resume_after_restart`, in `app/main.py`
+aufgerufen), statt unbeaufsichtigt neue kostenpflichtige Anrufe zu starten.
 
 ## Coding-Konventionen
 
@@ -110,7 +144,13 @@ umgehen.
    jedem Outbound-Call** prueft `services/call_service.py::can_start_call`
    sowohl das Lead-Flag als auch die nummernbasierte Sperrliste
    (`DoNotCallRepository.is_blocked`) - die Sperre gilt auch fuer neue Leads
-   mit derselben Nummer.
+   mit derselben Nummer. Gilt fuer JEDEN Call-Startpfad ausnahmslos, da alle
+   (Einzelanruf `api/calls.py`, Testanruf `api/telephony.py`, Kampagne
+   `services/campaign_service.py`) dieselbe `CallService.can_start_call`-
+   Pruefung aufrufen statt eigener Kopien - ein per Dashboard gesperrter
+   Kontakt kann daher auch innerhalb einer laufenden Kampagne technisch nicht
+   angerufen werden (per `tests/test_campaign_manager.py`/
+   `tests/test_api_dashboard.py` verifiziert).
 4. **Versand-/Terminbestaetigung**: Dario darf einen erfolgten Versand nur
    behaupten, wenn `tools/call_tools.py::ToolExecutor.send_email` /
    `send_whatsapp` tatsaechlich `success=True` zurueckgibt
@@ -139,6 +179,16 @@ umgehen.
    abschaltbar nur ueber `TWILIO_VALIDATE_SIGNATURE=false` fuer lokales
    Debugging) - ungueltige Requests werden mit 403 abgelehnt, bevor
    irgendein Call-Zustand veraendert wird.
+9. **Dashboard-Auth**: alle Dashboard-API-Router (`api/leads.py`,
+   `api/calls.py`, `api/campaigns.py`, `api/prompt_versions.py`,
+   `api/voices.py`, `api/settings_api.py`, `api/do_not_call.py`,
+   `api/telephony.py`) haengen `Depends(require_auth)` als Router-weite
+   Dependency ein (`core/auth.py`) - ausgenommen bewusst nur `api/twilio.py`
+   (Signaturpruefung statt Session) und `GET /api/health`/`GET
+   /api/auth/me`. Twilio Auth Token, Account SID (ausser maskiert), das
+   Dashboard-Passwort und alle Session-Tokens verlassen das Backend NIE im
+   Klartext an das Frontend - `api/telephony.py::_mask_sid` maskiert die
+   Account SID, `core/auth.py::_sessions` haelt Tokens nur serverseitig.
 
 ## Darios Rolle
 
@@ -176,9 +226,11 @@ ruff check .                        # Linting
 source .venv/bin/activate
 python -m app.chat_test             # Text-Test (kein Telefon/Audio noetig)
 python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + TTS-Provider)
-uvicorn app.main:app --reload       # API + Dashboard (http://127.0.0.1:8000)
+uvicorn app.main:app --reload       # API + einfaches Jinja2-Dashboard (http://127.0.0.1:8000)
 python -m app.twilio_test_call      # echter Twilio-Testanruf (fragt vor dem Anruf nach Bestaetigung)
 python -m scripts.import_leads_csv --file leads.csv
+
+cd frontend && npm run dev          # DVTelefonbot Dashboard (http://localhost:3000, siehe README Abschnitt 17)
 ```
 
 Ausfuehrliche Setup-Schritte (Python, whisper.cpp, llama.cpp, Piper/Chatterbox,
@@ -262,3 +314,62 @@ schnellere, aber synthetischer klingende Alternative bestehen
   `customParameters` an) - siehe `phone/twilio_voice.py::build_connect_stream_twiml`
   und `api/twilio.py::_await_start_event`. Die URL behaelt den Query-Parameter
   zusaetzlich als harmlosen Fallback.
+- **Barge-In war faktisch tot**: die urspruengliche `TwilioMediaStreamSession`
+  las eingehende WebSocket-Nachrichten NUR waehrend der Zuhoer-Phase - waehrend
+  Darios eigener TTS-Ausgabe (`_speak()`) wurde nie `receive_text()` aufgerufen,
+  wodurch Anrufer-Sprache waehrend der Wiedergabe schlicht nie verarbeitet
+  wurde. Zusaetzlich wurden gesendete Audio-Chunks ohne Echtzeit-Kadenz
+  moeglichst schnell rausgehauen, was das Zeitfenster fuer eine Unterbrechung
+  auf praktisch Null reduzierte. Behoben durch einen einzigen, durchgehend
+  laufenden Empfangs-Task fuer die gesamte Session-Dauer (liest immer,
+  unabhaengig vom Sprech-/Zuhoer-Status) und Echtzeit-Pacing beim Senden
+  (20ms/Frame) - siehe `phone/twilio_media_handler.py::_receive_loop`. Mit
+  simuliertem Twilio-Stream verifiziert: Unterbrechung mitten im Satz loest
+  jetzt zuverlaessig ein `clear`-Event aus.
+- **WebSocket wurde nach regulaerem Gespraechsende nicht sauber geschlossen**:
+  fuehrte bei manchen Clients zu einem abrupten Verbindungsabbruch statt eines
+  Close-Handshakes (kosmetisch - der eigentliche Anruf-Status wurde bereits
+  korrekt in der DB persistiert). Behoben durch explizites `websocket.close()`
+  nach normalem Session-Ende (`api/twilio.py::twilio_media_stream`).
+- **`WHISPER_MODEL_PATH` Standard auf `ggml-medium.bin` umgestellt** (vorher
+  `small`): bei einem vollstaendigen simulierten Testanruf ueber die 8kHz-
+  Telefonqualitaet erkannte `small` eine diktierte E-Mail-Adresse
+  ("info at ... punkt de") ohne jedes "@"-Zeichen - die Kontaktdatenerfassung
+  scheiterte komplett. Mit `medium` wurde derselbe Anruf korrekt bis zur
+  E-Mail-Bestaetigung und Uebergabe durchlaufen, inklusive korrektem Speichern
+  in der Datenbank. `small` bleibt als schnellere Alternative verfuegbar,
+  ist fuer telefonisch diktierte Kontaktdaten aber nicht zu empfehlen. Ein
+  bestimmtes Wort ("Tschüss", in dieser Piper-Synthese) wurde auch mit
+  `medium` als "Schatz"/"Schutz" gehoert - "Auf Wiederhören" wurde dagegen in
+  allen Tests korrekt erkannt.
+- **DVTelefonbot Dashboard (`frontend/`, siehe README Abschnitt 17) - Stand
+  dieser Version:**
+  - `api/settings_api.py`: nur die Kampagnen-Parallelitaets-Einstellungen
+    (Standard/Max/Pause zwischen Anrufen) sind echt an
+    `services/campaign_service.py` angebunden. Agent-Name/Firma/Standort und
+    die Anruf-Timeouts (Cooldown/Warte-/Stille-Timeout) werden im
+    Einstellungen-Bereich nur informativ aus `.env` angezeigt, nicht per
+    Dashboard ueberschreibbar - `_EDITABLE_KEYS` in `api/settings_api.py`
+    bewusst schmal gehalten, statt dekorative, wirkungslose Eingabefelder
+    anzubieten.
+  - Live-Status (`api/live_status.py`, `/ws/live-status`) ist Polling-basiert
+    (Backend fragt alle 1.5s die DB ab und sendet das Ergebnis), kein echtes
+    Event-Pub/Sub aus der Twilio-Media-Stream-Session heraus - fuer eine
+    Status-Anzeige ausreichend, aber kein Ersatz fuer echtes Streaming, falls
+    das je gebraucht wird.
+  - Kein automatisierter Browser-/E2E-Test des Frontends (kein Headless-
+    Browser in dieser Entwicklungsumgebung verfuegbar). Verifiziert wurden:
+    `npm run build` und `npm run lint` (beide fehlerfrei), die Backend-API
+    per `pytest` (`tests/test_api_dashboard.py`, `tests/test_campaign_manager.py`,
+    `tests/test_auth.py`, echte FastAPI-App, Fake-Twilio-Provider statt
+    echter Anrufe), sowie ein manueller Rauchtest per `curl` gegen das
+    tatsaechlich laufende Backend (Login/Cookie/geschuetzte Routen,
+    automatisches Seeding von Prompt-Version und Stimme aus der bestehenden
+    Produktionskonfiguration). Ein Klick-Durchlauf im echten Browser vor
+    produktivem Einsatz wird empfohlen.
+  - Beim Login-Cookie mit `expires=<datetime>` an `Response.set_cookie`
+    uebergeben, NICHT `expires=<int>`: Pythons `http.cookies` interpretiert
+    einen rohen `int` bei `expires` als Sekunden-Offset ab JETZT, nicht als
+    Unix-Timestamp - ein versehentlich als Timestamp uebergebener `int` fuehrt
+    zu einem Ablaufdatum ~56 Jahre in der Zukunft (in dieser Version
+    gefunden und behoben, siehe `api/auth.py::login`).

@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.auth import require_auth
 from database.database import get_db_session
 from database.models import Lead, LeadStatus, PreferredContact
 from database.repository import CallRepository, LeadRepository
+from services.csv_import import build_preview
 from services.lead_service import LeadService, LeadValidationError
 
-router = APIRouter(prefix="/api/leads", tags=["leads"])
+router = APIRouter(prefix="/api/leads", tags=["leads"], dependencies=[Depends(require_auth)])
 
 
 class LeadCreate(BaseModel):
@@ -62,6 +65,7 @@ class LeadOut(BaseModel):
     preferred_contact: PreferredContact
     do_not_call: bool
     callback_note: str | None
+    callback_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -117,3 +121,31 @@ async def update_lead(lead_id: int, payload: LeadUpdate, session: DbSession) -> 
     if lead is None:
         raise HTTPException(status_code=404, detail="Lead nicht gefunden")
     return lead
+
+
+@router.delete("/{lead_id}", status_code=204)
+async def delete_lead(lead_id: int, session: DbSession) -> None:
+    deleted = await LeadRepository(session).delete(lead_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Lead nicht gefunden")
+
+
+@router.post("/import/preview")
+async def preview_csv_import(file: UploadFile) -> dict:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=422, detail="Nur CSV-Dateien werden unterstuetzt.")
+    raw = await file.read()
+    try:
+        return build_preview(raw)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"CSV konnte nicht gelesen werden: {exc}") from exc
+
+
+@router.post("/import/confirm")
+async def confirm_csv_import(rows: list[dict], session: DbSession) -> dict:
+    created, errors = await LeadService(session).import_from_rows(rows)
+    return {
+        "created_count": len(created),
+        "created_ids": [lead.id for lead in created],
+        "errors": errors,
+    }

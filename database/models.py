@@ -62,6 +62,14 @@ class CallResult(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class CampaignStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    STOPPED = "STOPPED"
+    COMPLETED = "COMPLETED"
+
+
 class Lead(Base):
     __tablename__ = "leads"
 
@@ -104,6 +112,9 @@ class Call(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False, index=True)
+    campaign_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaigns.id"), nullable=True, index=True
+    )
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -118,9 +129,15 @@ class Call(Base):
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Twilio Call-SID, sobald bekannt - erlaubt Live-Status-Updates + Hangup
+    # aus dem Dashboard heraus zuzuordnen, ohne bei jedem Statuswechsel die
+    # Session selbst durchsuchen zu muessen.
+    twilio_call_sid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     lead: Mapped[Lead] = relationship("Lead", back_populates="calls")
+    campaign: Mapped[Campaign | None] = relationship("Campaign", back_populates="calls")
 
 
 class DoNotCall(Base):
@@ -132,3 +149,82 @@ class DoNotCall(Base):
     telefonnummer: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Campaign(Base):
+    """Sammelanruf-Kampagne: eine Menge von Leads, die mit begrenzter
+    Parallelitaet automatisch nacheinander/parallel angerufen werden
+    (siehe services/campaign_service.py::CampaignManager)."""
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    lead_ids_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-Liste von Lead-IDs
+    max_concurrent: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+
+    status: Mapped[CampaignStatus] = mapped_column(
+        Enum(CampaignStatus), default=CampaignStatus.DRAFT, nullable=False
+    )
+
+    total_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    calls: Mapped[list[Call]] = relationship("Call", back_populates="campaign")
+
+
+class PromptVersion(Base):
+    """Versionierter Systemprompt (Abschnitt 21). Nur die Version mit
+    is_active=True wird von NEUEN Gespraechen verwendet - laufende Calls
+    behalten die Version, mit der sie gestartet wurden (siehe
+    agent/prompts.py::load_system_prompt)."""
+
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VoiceProfile(Base):
+    """Eine hochladbare Referenzstimme fuer Chatterbox-Voice-Cloning
+    (Abschnitt 22). Nur die Stimme mit is_active=True wird fuer neue
+    TTS-Syntheseaufrufe verwendet (siehe app/bootstrap.py::get_tts_provider)."""
+
+    __tablename__ = "voice_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)  # Chatterbox-Standardstimme
+
+    exaggeration: Mapped[float] = mapped_column(default=0.22)
+    cfg_weight: Mapped[float] = mapped_column(default=0.35)
+    temperature: Mapped[float] = mapped_column(default=0.55)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """Laufzeit-editierbare Einstellungen (Abschnitt 28) - bewusst getrennt
+    von .env: .env bleibt fuer Secrets/Umgebungswerte, diese Tabelle fuer
+    Werte, die ueber das Dashboard ohne Neustart geaendert werden sollen."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

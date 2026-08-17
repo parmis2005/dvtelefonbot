@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # Whisper
     whisper_cpp_binary: str = "whisper-cli"
-    whisper_model_path: str = "./models/whisper/ggml-small.bin"
+    whisper_model_path: str = "./models/whisper/ggml-medium.bin"
     whisper_language: str = "de"
 
     # TTS (Piper)
@@ -109,6 +109,24 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"
+
+    # Dashboard-Login (einzelner Admin-Account, siehe core/auth.py). Wird NIE
+    # an das Frontend ausgeliefert - nur serverseitig fuer den Login-Vergleich
+    # genutzt.
+    dashboard_username: str = ""
+    dashboard_password: str = ""
+    dashboard_session_ttl_hours: int = 12
+    # Kommagetrennte Liste zusaetzlicher erlaubter CORS-Origins fuer das
+    # Next.js-Dashboard in Produktion (z.B. https://dein-dashboard.vercel.app).
+    # localhost:3000 ist in app/main.py immer erlaubt (lokale Entwicklung).
+    dashboard_frontend_origins: str = ""
+    # Lokal (Frontend+Backend auf localhost, verschiedene Ports) reicht
+    # SameSite=Lax + secure=False. Sobald Frontend (Vercel) und Backend auf
+    # unterschiedlichen Domains ueber HTTPS laufen, MUSS auf
+    # samesite=none + secure=True umgestellt werden, sonst verwirft der
+    # Browser das Session-Cookie bei Cross-Origin-Requests.
+    dashboard_cookie_secure: bool = False
+    dashboard_cookie_samesite: str = "lax"
 
     @property
     def secrets_configured(self) -> dict[str, bool]:

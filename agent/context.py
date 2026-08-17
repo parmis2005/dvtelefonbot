@@ -72,6 +72,14 @@ class ConversationContext:
     history: list[Turn] = field(default_factory=list)
     collected_notes: list[str] = field(default_factory=list)
 
+    # Bei Call-Start aus der aktiven database/models.py::PromptVersion
+    # gefuellt (siehe agent/dario.py::Dario.for_lead) und danach fuer die
+    # gesamte Gespraechsdauer NICHT mehr veraendert - ein bereits laufendes
+    # Gespraech darf beim Speichern einer neuen Prompt-Version nicht die
+    # Version wechseln. None => agent/prompts.py::load_system_prompt()
+    # (statische Datei) als Fallback.
+    system_prompt: str | None = None
+
     def add_turn(self, speaker: str, text: str) -> None:
         self.history.append(Turn(speaker=speaker, text=text))
 

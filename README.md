@@ -94,16 +94,20 @@ siehe `agent/conversation.py::_llm_or_fallback`).
 brew install whisper-cpp   # stellt z.B. `whisper-cli` bereit
 ```
 
-Mehrsprachiges Modell herunterladen (Standard: `ggml-small.bin`, guter
-Kompromiss aus Tempo/Genauigkeit fuer Deutsch) nach `models/whisper/`:
+Mehrsprachiges Modell herunterladen (Standard: `ggml-medium.bin`, ~1.5GB) nach
+`models/whisper/`:
 
 ```bash
-curl -L -o models/whisper/ggml-small.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+curl -L -o models/whisper/ggml-medium.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 ```
 
-`.env`: `WHISPER_MODEL_PATH=./models/whisper/ggml-small.bin`. Fuer hoehere
-Genauigkeit (langsamer) alternativ `ggml-medium.bin`.
+`.env`: `WHISPER_MODEL_PATH=./models/whisper/ggml-medium.bin`. `medium` statt
+`small` ist bewusst der Standard: bei echten Telefonanrufen (8kHz, verlustbehaftetes
+G.711 mu-law) erkennt `small` z.B. diktierte E-Mail-Adressen unzuverlaessig
+(kein "@" im Ergebnis), `medium` deutlich zuverlaessiger - siehe CLAUDE.md
+"Grenzen der aktuellen Version". Fuer schnellere, aber ungenauere Antworten
+alternativ `ggml-small.bin` (~488MB).
 
 ## 7. TTS installieren
 
@@ -167,14 +171,20 @@ ca. 10-15s, danach jede Antwort auf CPU nochmal ca. 25-30s Generierungszeit -
 fuer diesen Test in Ordnung, aber (noch) nicht telefonietauglich (siehe
 CLAUDE.md "Grenzen der aktuellen Version").
 
-## 10. Dashboard oeffnen
+## 10. Backend + einfaches Dashboard oeffnen
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Dashboard: http://127.0.0.1:8000/
+Einfaches, serverseitig gerendertes Dashboard (Jinja2, `dashboard/routes.py`):
+http://127.0.0.1:8000/
 API-Dokumentation (automatisch generiert): http://127.0.0.1:8000/docs
+
+Fuer den taeglichen Betrieb (Kampagnen, Kontakte, Live-Anrufe, Prompt/Stimmen-
+Verwaltung, Telefonie-Status, Sperrliste, Einstellungen) siehe stattdessen
+**Abschnitt 17 (DVTelefonbot Dashboard)** - das vollstaendige Next.js-
+Kontrollzentrum. Beide laufen gegen dasselbe Backend/dieselbe Datenbank.
 
 Leads importieren:
 
@@ -331,3 +341,89 @@ Datenbank/im Dashboard (`services/call_service.py`,
 Bei allen anderen Problemen: Logs in `logs/dario.log` (strukturiert, JSON)
 sowie Konsolenausgabe pruefen. Telefonnummern werden in Logs automatisch
 maskiert (`core/logging.py`).
+
+## 17. DVTelefonbot Dashboard (Next.js Frontend)
+
+Vollstaendiges Kontrollzentrum fuer den taeglichen Betrieb - Next.js +
+TypeScript, im selben Repository unter `frontend/` (bewusst kein zweites
+Repo). Baut ausschliesslich auf dem bestehenden Backend/den bestehenden
+Provider-Pattern auf (Twilio-Anruf-Pfad, Conversation Engine, STT/TTS,
+Datenbank) - keine zweite, vereinfachte Version von Dario.
+
+**Funktionsumfang:** Uebersicht (Systemstatus, Kennzahlen), Kampagnen
+(Sammelanrufe mit bis zu 10 parallelen, unabhaengigen Gespraechen, Pause/
+Fortsetzen/Stoppen), Kontakte (CRUD, CSV-Import mit Vorschau + automatischer
+Spaltenerkennung), Live-Anrufe (WebSocket-Live-Status), Anrufhistorie +
+Transkript-Ansicht, Rueckrufe, Dario-Status, Prompt-Editor mit automatischer
+Versionierung, Stimmenverwaltung (WAV-Upload, Test, Aktivierung - kein
+Pitch-/Time-Stretching), Telefonie-Status + Testanruf, Sperrliste
+(serverseitig vor jedem Anruf erzwungen), Einstellungen.
+
+**Design:** eigenes, aus `https://www.digitalvision.site/` abgeleitetes
+Design-System (Typografie Space Grotesk + Inter, Radius-/Schatten-/
+Akzentfarben-Sprache), als CSS-Custom-Properties in
+`frontend/src/app/globals.css` (`--dv-*`) definiert und per Tailwind-`@theme`
+als Utility-Klassen (`bg-dv-surface`, `rounded-dv-md`, ...) nutzbar. Bewusst
+HELL statt der dunklen Optik der Marketing-Seite (siehe Auftrag), aber mit
+identischer Marken-DNA.
+
+**Auth:** einzelner Admin-Account (`.env`: `DASHBOARD_USERNAME`,
+`DASHBOARD_PASSWORD`), serverseitige In-Memory-Sessions (`core/auth.py`),
+httpOnly-Cookie. Da das Frontend das Backend cross-origin anspricht, gibt es
+bewusst KEIN serverseitiges Next.js-`proxy.ts` fuer die Zugriffskontrolle
+(das Session-Cookie ist fuer die Backend-Origin gesetzt und fuer den
+Next.js-Server gar nicht sichtbar) - die Durchsetzung passiert ausschliesslich
+im Backend (`core/auth.py::require_auth`), das Frontend leitet bei 401 nur
+sauber zu `/login` weiter.
+
+**Starten (lokal):**
+
+```bash
+# Terminal 1: Backend
+source .venv/bin/activate
+uvicorn app.main:app --reload
+
+# Terminal 2: Frontend
+cd frontend
+npm install   # einmalig
+cp .env.example .env.local   # einmalig, Default passt fuer lokale Entwicklung
+npm run dev
+```
+
+Dashboard: http://localhost:3000/ (leitet zu `/login`, falls nicht
+angemeldet). Zugangsdaten stehen in der lokalen `.env` des Backends
+(`DASHBOARD_USERNAME`/`DASHBOARD_PASSWORD`).
+
+**Deployment:** Frontend fuer Vercel vorbereitet (`NEXT_PUBLIC_API_BASE_URL`
+als Vercel-Umgebungsvariable auf die oeffentliche Backend-URL setzen). Das
+Backend bleibt bewusst ein separater, dauerhaft laufender Server (z.B. VPS) -
+**nicht** auf Vercel, da die langlebigen Twilio-Media-Stream-WebSockets
+(`api/twilio.py`) nicht durch Vercel-Serverless-Functions laufen koennen.
+Sobald Frontend und Backend auf getrennten HTTPS-Domains laufen, muessen in
+der Backend-`.env` `DASHBOARD_COOKIE_SECURE=true` und
+`DASHBOARD_COOKIE_SAMESITE=none` gesetzt werden (siehe `.env.example`),
+sonst verwirft der Browser das Cross-Origin-Session-Cookie.
+
+**Live-Status:** `api/live_status.py` liefert aktive Anrufe ueber eine
+WebSocket (`/ws/live-status`), die serverseitig alle 1.5s die Datenbank
+abfragt - kein echtes Event-Pub/Sub aus der Media-Stream-Session heraus (das
+haette den bereits verifizierten Twilio-Audio-Pfad angefasst), aber fuer eine
+Status-Anzeige (nicht die Audio-Echtzeitschleife selbst) ausreichend "live".
+
+**Ehrlich offene Punkte (Stand dieser Version):**
+- `api/settings_api.py`: nur die Kampagnen-Parallelitaets-Einstellungen sind
+  echt an die Kampagnen-Engine angebunden. Agent-Name/Firma/Standort und die
+  Anruf-Timeouts (Cooldown/Warte-/Stille-Timeout) werden im
+  Einstellungen-Bereich nur informativ angezeigt (Herkunft `.env`) - eine
+  echte Laufzeit-Ueberschreibung dieser Werte ist noch nicht verdrahtet.
+- Kein automatisierter Browser-Test (kein Headless-Browser/Playwright in
+  dieser Umgebung verfuegbar) - verifiziert wurden `npm run build`,
+  `npm run lint` (beide fehlerfrei), sowie ein manueller End-to-End-Rauchtest
+  per `curl` gegen das echte laufende Backend (Login, Session-Cookie,
+  geschuetzte Routen, automatisches Seeding von Prompt-Version/Stimme aus der
+  bestehenden Produktionskonfiguration). Ein Klick-Durchlauf im echten
+  Browser vor dem produktiven Einsatz wird empfohlen.
+- CSV-Import/Sammelanruf-Auswahl/Do-Not-Call/Kampagnen-Engine sind ueber
+  `tests/test_api_dashboard.py` und `tests/test_campaign_manager.py`
+  end-to-end gegen die echte FastAPI-App getestet (mit einem Fake-Twilio-
+  Provider statt echter Anrufe).

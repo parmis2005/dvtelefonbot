@@ -16,7 +16,7 @@ from agent.conversation import ConversationEngine, EngineResult
 from core.config import BusinessConfig, Settings
 from core.logging import get_logger
 from database.models import Lead
-from database.repository import LeadRepository
+from database.repository import LeadRepository, PromptVersionRepository
 from services.call_service import CallService
 from services.summary_service import build_summary
 from services.transcript_service import persist_transcript, write_transcript_file
@@ -87,6 +87,14 @@ class Dario:
             raise ValueError(f"Lead {lead_id} nicht gefunden")
         instance = cls(session, settings, business_config, engine, tool_executor, lead_id, call_id)
         instance.context.lead = lead_to_context_data(lead)
+
+        # Aktive Prompt-Version einmalig bei Call-Start festlegen (siehe
+        # agent/context.py::ConversationContext.system_prompt) - laufende
+        # Gespraeche wechseln danach nicht mehr die Version.
+        active_prompt = await PromptVersionRepository(session).get_active()
+        if active_prompt is not None:
+            instance.context.system_prompt = active_prompt.content
+
         return instance
 
     def opening_line(self) -> str:

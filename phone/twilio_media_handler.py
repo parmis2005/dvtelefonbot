@@ -7,6 +7,13 @@ die Gespraechslogik selbst wird hier nicht angefasst, nur an einen neuen
 Audio-Transport angebunden (genau wie phone/call_controller.py es fuer
 Asterisk tut, nur turn-basiert statt Stream-basiert).
 
+Architektur (wichtig fuer Barge-In): ein einzelner, durchgehend laufender
+Empfangs-Task liest die WebSocket fuer die GESAMTE Session-Dauer, nicht nur
+waehrend wir "zuhoeren". Nur so kann waehrend Darios eigener TTS-Ausgabe
+gleichzeitig auf eingehende Anrufer-Sprache geprueft werden. Eine fruehere
+Version las eingehende Nachrichten nur innerhalb der Zuhoer-Phase - Barge-In
+konnte dadurch faktisch nie ausgeloest werden.
+
 Protokoll: https://www.twilio.com/docs/voice/media-streams/websocket-messages
 """
 
@@ -71,14 +78,22 @@ class TwilioMediaStreamSession:
         # in der Stream-URL nicht zuverlaessig durch - Fehler 31920).
         self.stream_sid: str | None = stream_sid
         self.call_sid: str | None = twilio_call_sid
-        self._inbound_buffer: list[np.ndarray] = []
+
         self._vad = VoiceActivityDetector(aggressiveness=2)
         self._endpoint = EndpointDetector(EndpointConfig(silence_timeout_ms=silence_timeout_ms))
         self._vad_carry = np.array([], dtype=np.int16)  # Rest-Samples < einem VAD-Frame
 
         self._speaking = False
-        self._playback_task: asyncio.Task | None = None
+        self._listening = False
         self._barge_in_event = asyncio.Event()
+
+        # Vom durchgehenden Empfangs-Task befuellt, von _listen_for_utterance
+        # konsumiert - entkoppelt Lesen (immer aktiv) von Verarbeiten
+        # (nur waehrend der Zuhoer-Phase).
+        self._current_utterance: list[np.ndarray] = []
+        self._utterance_ready = asyncio.Event()
+        self._receiver_task: asyncio.Task | None = None
+        self._stopped = asyncio.Event()
 
     # --- Hauptschleife -------------------------------------------------
 
@@ -88,11 +103,16 @@ class TwilioMediaStreamSession:
                 await self._wait_for_start()
             else:
                 await self.call_service.mark_answered(self.call_id)
+
+            self._receiver_task = asyncio.create_task(self._receive_loop())
+
             opening = self.dario.opening_line()
             await self._speak(opening)
 
-            while self.dario.call_active:
+            while self.dario.call_active and not self._stopped.is_set():
                 text = await self._listen_for_utterance()
+                if self._stopped.is_set():
+                    break
                 if not text:
                     continue
                 outcome = await self.dario.process_utterance(text)
@@ -106,6 +126,14 @@ class TwilioMediaStreamSession:
         except Exception:
             logger.exception("Fehler in Twilio Media Stream Session (Call %s)", self.call_id)
         finally:
+            if self._receiver_task is not None:
+                self._receiver_task.cancel()
+                try:
+                    await self._receiver_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Fehler beim Beenden des Empfangs-Tasks (Call %s)", self.call_id)
             await self._on_session_end()
 
     async def _wait_for_start(self) -> None:
@@ -124,6 +152,62 @@ class TwilioMediaStreamSession:
                 return
             if msg.get("event") == "connected":
                 continue
+
+    # --- Durchgehender Empfang (laeuft parallel zur gesamten Session) ----
+
+    async def _receive_loop(self) -> None:
+        """Liest die WebSocket ununterbrochen, solange die Session laeuft -
+        unabhaengig davon, ob Dario gerade spricht oder zuhoert. Nur so kann
+        Barge-In waehrend Darios eigener Ausgabe erkannt werden."""
+        try:
+            while True:
+                raw = await self.ws.receive_text()
+                msg = json.loads(raw)
+                event = msg.get("event")
+
+                if event == "media":
+                    pcm_8k = mulaw_to_pcm16(base64.b64decode(msg["media"]["payload"]))
+                    endpoint_hit = self._process_vad_frames(pcm_8k)
+                    if self._listening:
+                        self._current_utterance.append(pcm_8k)
+                        if endpoint_hit:
+                            self._utterance_ready.set()
+                elif event == "stop":
+                    self.dario.call_active = False
+                    self._stopped.set()
+                    self._utterance_ready.set()
+                    return
+                elif event == "mark":
+                    continue
+        except WebSocketDisconnect:
+            self._stopped.set()
+            self._utterance_ready.set()
+        except asyncio.CancelledError:
+            raise
+
+    def _process_vad_frames(self, new_pcm_8k: np.ndarray) -> bool:
+        """Speist neue 8kHz-Samples framegenau in die VAD/Endpoint-Erkennung
+        (die auf 16kHz/30ms-Frames ausgelegt ist). Laeuft fuer JEDEN
+        eingehenden Frame, unabhaengig vom Zuhoer-Status: so kann Barge-In
+        auch waehrend Darios Ausgabe erkannt werden. Die Endpoint-Erkennung
+        (Sprechende) zaehlt nur, wenn wir gerade aktiv zuhoeren."""
+        pcm_16k = resample_pcm16(new_pcm_8k, TWILIO_SAMPLE_RATE, STT_SAMPLE_RATE)
+        combined = np.concatenate([self._vad_carry, pcm_16k])
+
+        frame_len = int(STT_SAMPLE_RATE * VAD_FRAME_MS / 1000)
+        n_frames = len(combined) // frame_len
+        endpoint_hit = False
+
+        for i in range(n_frames):
+            frame = combined[i * frame_len : (i + 1) * frame_len]
+            is_speech = self._vad.is_speech(frame.tobytes(), STT_SAMPLE_RATE)
+            if is_speech and self._speaking:
+                self._barge_in_event.set()
+            if self._listening and self._endpoint.process_frame(is_speech):
+                endpoint_hit = True
+
+        self._vad_carry = combined[n_frames * frame_len :]
+        return endpoint_hit
 
     # --- Sprechen (TTS -> mu-law -> WebSocket) ---------------------------
 
@@ -155,6 +239,10 @@ class TwilioMediaStreamSession:
         pcm_8k = resample_pcm16(pcm, src_rate, TWILIO_SAMPLE_RATE)
         mulaw = pcm16_to_mulaw(pcm_8k)
 
+        loop = asyncio.get_event_loop()
+        next_send = loop.time()
+        frame_seconds = FRAME_MS / 1000
+
         for i in range(0, len(mulaw), FRAME_SAMPLES_8K):
             if self._barge_in_event.is_set():
                 await self._send_clear()
@@ -170,44 +258,39 @@ class TwilioMediaStreamSession:
                     }
                 )
             )
-            # kurze Pause, damit wir zwischendurch auf Barge-In/Events reagieren
-            # koennen, ohne den gesamten Puffer blockierend auf einmal zu senden
-            await asyncio.sleep(0)
+            # In Echtzeit-Kadenz senden (statt alles auf einmal): nur so
+            # bleibt waehrend der Wiedergabe ein tatsaechliches Zeitfenster,
+            # in dem Barge-In die restliche, noch nicht gesendete Antwort
+            # abbrechen kann, bevor sie beim Anrufer ankommt.
+            next_send += frame_seconds
+            delay = next_send - loop.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
 
     async def _send_clear(self) -> None:
         await self.ws.send_text(json.dumps({"event": "clear", "streamSid": self.stream_sid}))
 
-    # --- Zuhoeren (WebSocket -> mu-law -> PCM16 -> STT) -------------------
+    # --- Zuhoeren (aus der vom Empfangs-Task befuellten Warteschlange) ----
 
     async def _listen_for_utterance(self) -> str:
-        self._inbound_buffer = []
+        self._current_utterance = []
         self._endpoint.reset()
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + self.max_utterance_seconds
-
-        while loop.time() < deadline:
+        self._utterance_ready.clear()
+        self._listening = True
+        try:
             try:
-                raw = await asyncio.wait_for(self.ws.receive_text(), timeout=deadline - loop.time())
+                await asyncio.wait_for(
+                    self._utterance_ready.wait(), timeout=self.max_utterance_seconds
+                )
             except TimeoutError:
-                break
-            msg = json.loads(raw)
-            event = msg.get("event")
+                pass
+        finally:
+            self._listening = False
 
-            if event == "media":
-                pcm = mulaw_to_pcm16(base64.b64decode(msg["media"]["payload"]))
-                self._inbound_buffer.append(pcm)
-                if self._process_vad_frames(pcm):
-                    break
-            elif event == "stop":
-                self.dario.call_active = False
-                break
-            elif event == "mark":
-                continue
-
-        if not self._inbound_buffer:
+        if self._stopped.is_set() or not self._current_utterance:
             return ""
 
-        full_pcm_8k = np.concatenate(self._inbound_buffer)
+        full_pcm_8k = np.concatenate(self._current_utterance)
         pcm_16k = resample_pcm16(full_pcm_8k, TWILIO_SAMPLE_RATE, STT_SAMPLE_RATE)
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -218,29 +301,6 @@ class TwilioMediaStreamSession:
             return result.text
         finally:
             Path(wav_path).unlink(missing_ok=True)
-
-    def _process_vad_frames(self, new_pcm_8k: np.ndarray) -> bool:
-        """Speist neue 8kHz-Samples framegenau in die VAD/Endpoint-Erkennung
-        (die auf 16kHz/30ms-Frames ausgelegt ist) und meldet True, sobald ein
-        Sprechende erkannt wurde. Loest ausserdem Barge-In aus, falls Dario
-        gerade selbst spricht."""
-        pcm_16k = resample_pcm16(new_pcm_8k, TWILIO_SAMPLE_RATE, STT_SAMPLE_RATE)
-        combined = np.concatenate([self._vad_carry, pcm_16k])
-
-        frame_len = int(STT_SAMPLE_RATE * VAD_FRAME_MS / 1000)
-        n_frames = len(combined) // frame_len
-        endpoint_hit = False
-
-        for i in range(n_frames):
-            frame = combined[i * frame_len : (i + 1) * frame_len]
-            is_speech = self._vad.is_speech(frame.tobytes(), STT_SAMPLE_RATE)
-            if is_speech and self._speaking:
-                self._barge_in_event.set()
-            if self._endpoint.process_frame(is_speech):
-                endpoint_hit = True
-
-        self._vad_carry = combined[n_frames * frame_len :]
-        return endpoint_hit
 
     async def _hangup_real_call(self) -> None:
         """Beendet den ECHTEN Telefonanruf ueber die Twilio-API, wenn Dario
