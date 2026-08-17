@@ -26,6 +26,7 @@ from phone.asterisk import AsteriskProvider
 from phone.call_controller import CallController
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallNotAllowedError, CallService
+from services.greeting_audio import prepare_greeting_audio
 from services.telephony_diagnostics import check_webhook_reachable
 from tools.call_tools import ToolExecutor
 
@@ -192,9 +193,19 @@ async def create_twilio_call(payload: CallCreate, session: DbSession) -> CallOut
 
     call = await call_service.start_call(payload.lead_id)
     webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
+    status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
+    try:
+        await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
+    except Exception as exc:
+        await call_service.mark_failed(call.id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Begruessungs-Audio konnte nicht vorbereitet werden: {exc}",
+        ) from exc
+
     try:
         call_sid = await asyncio.get_event_loop().run_in_executor(
-            None, provider.start_outbound_call, lead.telefonnummer, webhook_url
+            None, provider.start_outbound_call, lead.telefonnummer, webhook_url, status_callback_url
         )
     except Exception as exc:
         await call_service.mark_failed(call.id)

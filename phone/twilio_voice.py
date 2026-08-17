@@ -47,7 +47,12 @@ class TwilioProvider:
         except Exception as exc:  # Twilio-SDK wirft diverse eigene Exception-Typen
             return False, str(exc)
 
-    def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
+    def start_outbound_call(
+        self,
+        to_number: str,
+        twiml_webhook_url: str,
+        status_callback_url: str | None = None,
+    ) -> str:
         """Loest einen echten, kostenpflichtigen Outbound-Call aus. Gibt die
         Twilio Call-SID zurueck."""
         logger.info(
@@ -55,13 +60,21 @@ class TwilioProvider:
             mask_phone(to_number),
             twiml_webhook_url,
         )
-        call = self._client.calls.create(
-            to=to_number,
-            from_=self.caller_id,
-            url=twiml_webhook_url,
-            method="POST",
-            status_callback_event=["initiated", "ringing", "answered", "completed"],
-        )
+        kwargs = {
+            "to": to_number,
+            "from_": self.caller_id,
+            "url": twiml_webhook_url,
+            "method": "POST",
+        }
+        if status_callback_url:
+            kwargs.update(
+                {
+                    "status_callback": status_callback_url,
+                    "status_callback_method": "POST",
+                    "status_callback_event": ["initiated", "ringing", "answered", "completed"],
+                }
+            )
+        call = self._client.calls.create(**kwargs)
         return call.sid
 
     def end_call(self, call_sid: str) -> None:

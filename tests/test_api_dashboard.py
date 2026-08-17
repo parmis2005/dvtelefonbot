@@ -18,6 +18,7 @@ import services.campaign_service as campaign_service_module
 from core.config import get_settings
 from database.database import get_session_factory, reset_engine_for_tests
 from database.repository import CallRepository, CampaignRepository
+from services.greeting_audio import PreparedGreeting
 
 
 class FakeTwilioProvider:
@@ -26,7 +27,12 @@ class FakeTwilioProvider:
     def __init__(self, account_sid: str, auth_token: str, caller_id: str):
         pass
 
-    def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
+    def start_outbound_call(
+        self,
+        to_number: str,
+        twiml_webhook_url: str,
+        status_callback_url: str | None = None,
+    ) -> str:
         FakeTwilioProvider.calls_made.append(to_number)
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
@@ -48,6 +54,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWILIO_PUBLIC_BASE_URL", "https://example-tunnel.test")
     monkeypatch.setattr(campaign_service_module, "TwilioProvider", FakeTwilioProvider)
     monkeypatch.setattr(campaign_service_module, "POLL_INTERVAL_SECONDS", 0.05)
+    async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
+        return PreparedGreeting(text="Hallo", path=tmp_path / "greeting.wav", bytes=84)
+
+    monkeypatch.setattr(campaign_service_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
     # Simuliert einen erreichbaren Tunnel - siehe tests/test_campaign_manager.py
     # fuer den Hintergrund (services/telephony_diagnostics.py).
     monkeypatch.setattr(

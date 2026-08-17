@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest_asyncio
 
+import services.tts_cache as tts_cache
 from core.config import get_settings
 from database.database import get_session_factory, init_db, reset_engine_for_tests
 from database.repository import LeadRepository
@@ -13,6 +14,8 @@ from database.repository import LeadRepository
 async def db_session(tmp_path, monkeypatch):
     db_path = tmp_path / "test_dario.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setattr(tts_cache, "CACHE_DIR", tmp_path / "tts_cache")
+    tts_cache._locks.clear()
     get_settings.cache_clear()
     await reset_engine_for_tests()
 

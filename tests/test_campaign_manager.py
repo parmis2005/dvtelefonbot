@@ -27,6 +27,7 @@ from core.config import get_settings
 from database.database import get_session_factory
 from database.models import CallResult, CallStatus, CampaignStatus
 from database.repository import CallRepository, CampaignRepository, LeadRepository
+from services.greeting_audio import PreparedGreeting
 from services.campaign_service import CampaignManager
 
 
@@ -36,7 +37,12 @@ class FakeTwilioProvider:
     def __init__(self, account_sid: str, auth_token: str, caller_id: str):
         pass
 
-    def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
+    def start_outbound_call(
+        self,
+        to_number: str,
+        twiml_webhook_url: str,
+        status_callback_url: str | None = None,
+    ) -> str:
         FakeTwilioProvider.calls_made.append(to_number)
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
@@ -46,10 +52,14 @@ async def _fake_webhook_reachable(settings) -> bool:
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _campaign_test_env(db_session, monkeypatch):
+async def _campaign_test_env(db_session, monkeypatch, tmp_path):
     FakeTwilioProvider.calls_made = []
     monkeypatch.setattr(campaign_service_module, "TwilioProvider", FakeTwilioProvider)
     monkeypatch.setattr(campaign_service_module, "POLL_INTERVAL_SECONDS", 0.05)
+    async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
+        return PreparedGreeting(text="Hallo", path=tmp_path / "greeting.wav", bytes=84)
+
+    monkeypatch.setattr(campaign_service_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
     # Der echte Erreichbarkeits-Check (services/telephony_diagnostics.py)
     # wuerde gegen die Fake-URL unten ins Leere laufen (DNS-Fehler, 5s
     # Timeout) - hier wie ein erreichbarer Tunnel simuliert, da genau diese

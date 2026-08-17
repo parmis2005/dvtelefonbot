@@ -25,9 +25,10 @@ import sys
 from core.config import get_settings
 from core.logging import get_logger
 from database.database import get_session_factory, init_db
-from database.repository import LeadRepository
+from database.repository import CallRepository, LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
+from services.greeting_audio import prepare_greeting_audio
 from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
@@ -144,16 +145,27 @@ async def run(args: argparse.Namespace) -> int:
 
         call = await call_service.start_call(lead.id, ignore_cooldown=True)
         webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
+        status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
+
+        try:
+            print("\nBereite Begruessungs-Audio vor ...")
+            greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
+            print(f"  OK ({greeting.bytes} Bytes)")
+        except Exception as exc:
+            print(f"\nFEHLER beim Vorbereiten der Begruessung: {exc}")
+            await call_service.mark_failed(call.id)
+            return 1
 
         try:
             call_sid = await asyncio.get_event_loop().run_in_executor(
-                None, provider.start_outbound_call, to_number, webhook_url
+                None, provider.start_outbound_call, to_number, webhook_url, status_callback_url
             )
         except Exception as exc:
             print(f"\nFEHLER beim Ausloesen des Anrufs: {exc}")
             await call_service.mark_failed(call.id)
             return 1
 
+        await CallRepository(session).update(call.id, twilio_call_sid=call_sid)
         print(f"\nAnruf ausgeloest. Twilio Call-SID: {call_sid}")
         print(f"Dario-Call-ID (Dashboard/DB): {call.id}")
         print("Sobald abgenommen wird, verbindet Twilio den Anruf mit Darios Media-Stream-WebSocket.")

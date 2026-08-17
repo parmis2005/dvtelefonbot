@@ -62,6 +62,7 @@ class TwilioMediaStreamSession:
         silence_timeout_ms: int = 900,
         max_utterance_seconds: float = 20.0,
         wait_timeout_seconds: int = 25,
+        greeting_audio_path: str | None = None,
     ):
         self.ws = websocket
         self.dario = dario
@@ -75,6 +76,7 @@ class TwilioMediaStreamSession:
         # Nur relevant, wenn der Kunde explizit um eine Wartepause gebeten
         # hat (ConversationContext.wait_mode) - siehe Dario.check_wait_timeout.
         self.wait_timeout_seconds = wait_timeout_seconds
+        self.greeting_audio_path = greeting_audio_path
 
         # Werden ueblicherweise vom Aufrufer schon aus dem "start"-Event
         # herausgelesen uebergeben (siehe api/twilio.py), da dort auch die
@@ -111,7 +113,19 @@ class TwilioMediaStreamSession:
             self._receiver_task = asyncio.create_task(self._receive_loop())
 
             opening = self.dario.opening_line()
-            await self._speak(opening)
+            logger.info(
+                "[GREETING] starting call_id=%s streamSid=%s callSid=%s",
+                self.call_id,
+                self.stream_sid,
+                self.call_sid,
+            )
+            await self._speak(opening, wav_path=self.greeting_audio_path, label="greeting")
+            logger.info(
+                "[GREETING] finished call_id=%s streamSid=%s stopped=%s",
+                self.call_id,
+                self.stream_sid,
+                self._stopped.is_set(),
+            )
 
             while self.dario.call_active and not self._stopped.is_set():
                 text = await self._listen_for_utterance()
@@ -198,6 +212,10 @@ class TwilioMediaStreamSession:
             self._utterance_ready.set()
         except asyncio.CancelledError:
             raise
+        except Exception:
+            self._stopped.set()
+            self._utterance_ready.set()
+            logger.exception("Fehler im Twilio-Empfangs-Task (Call %s)", self.call_id)
 
     def _process_vad_frames(self, new_pcm_8k: np.ndarray) -> bool:
         """Speist neue 8kHz-Samples framegenau in die VAD/Endpoint-Erkennung
@@ -225,22 +243,62 @@ class TwilioMediaStreamSession:
 
     # --- Sprechen (TTS -> mu-law -> WebSocket) ---------------------------
 
-    async def _speak(self, text: str) -> None:
-        self._speaking = True
-        self._barge_in_event.clear()
+    async def _speak(self, text: str, wav_path: str | None = None, label: str = "tts") -> None:
+        if self._stopped.is_set():
+            return
+
+        if wav_path is not None:
+            size = Path(wav_path).stat().st_size if Path(wav_path).exists() else 0
+            logger.info(
+                "[TTS] generation started call_id=%s label=%s source=cache",
+                self.call_id,
+                label,
+            )
+            logger.info(
+                "[TTS] generation finished bytes=%s call_id=%s label=%s source=cache",
+                size,
+                self.call_id,
+                label,
+            )
+            await self._stream_wav_file(wav_path)
+            return
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            generated_wav_path = tmp.name
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                wav_path = tmp.name
-            try:
-                await self.tts.synthesize(text, wav_path)
-                await self._stream_wav_file(wav_path)
-            finally:
-                Path(wav_path).unlink(missing_ok=True)
+            logger.info(
+                "[TTS] generation started call_id=%s label=%s provider=%s chars=%s",
+                self.call_id,
+                label,
+                type(self.tts).__name__,
+                len(text),
+            )
+            await self.tts.synthesize(text, generated_wav_path)
+            size = Path(generated_wav_path).stat().st_size
+            logger.info(
+                "[TTS] generation finished bytes=%s call_id=%s label=%s",
+                size,
+                self.call_id,
+                label,
+            )
+            if self._stopped.is_set():
+                return
+            await self._stream_wav_file(generated_wav_path)
         finally:
-            self._speaking = False
+            Path(generated_wav_path).unlink(missing_ok=True)
 
     async def _stream_wav_file(self, wav_path: str) -> None:
         import soundfile as sf
+
+        if self.stream_sid is None:
+            raise RuntimeError("Kann Audio ohne streamSid nicht an Twilio senden.")
+
+        logger.info(
+            "[AUDIO] sending to Twilio call_id=%s streamSid=%s wav_bytes=%s",
+            self.call_id,
+            self.stream_sid,
+            Path(wav_path).stat().st_size if Path(wav_path).exists() else 0,
+        )
 
         # Bewusst als float32 lesen und selbst nach int16 skalieren: manche
         # TTS-Provider (Chatterbox) schreiben 32bit-Float-WAVs, und
@@ -256,30 +314,45 @@ class TwilioMediaStreamSession:
         loop = asyncio.get_event_loop()
         next_send = loop.time()
         frame_seconds = FRAME_MS / 1000
+        chunks_sent = 0
 
-        for i in range(0, len(mulaw), FRAME_SAMPLES_8K):
-            if self._barge_in_event.is_set():
-                await self._send_clear()
-                break
-            chunk = mulaw[i : i + FRAME_SAMPLES_8K].tobytes()
-            payload = base64.b64encode(chunk).decode("ascii")
-            await self.ws.send_text(
-                json.dumps(
-                    {
-                        "event": "media",
-                        "streamSid": self.stream_sid,
-                        "media": {"payload": payload},
-                    }
+        self._barge_in_event.clear()
+        self._speaking = True
+        try:
+            for i in range(0, len(mulaw), FRAME_SAMPLES_8K):
+                if self._stopped.is_set():
+                    break
+                if self._barge_in_event.is_set():
+                    await self._send_clear()
+                    break
+                chunk = mulaw[i : i + FRAME_SAMPLES_8K].tobytes()
+                payload = base64.b64encode(chunk).decode("ascii")
+                await self.ws.send_text(
+                    json.dumps(
+                        {
+                            "event": "media",
+                            "streamSid": self.stream_sid,
+                            "media": {"payload": payload},
+                        }
+                    )
                 )
+                chunks_sent += 1
+                # In Echtzeit-Kadenz senden (statt alles auf einmal): nur so
+                # bleibt waehrend der Wiedergabe ein tatsaechliches Zeitfenster,
+                # in dem Barge-In die restliche, noch nicht gesendete Antwort
+                # abbrechen kann, bevor sie beim Anrufer ankommt.
+                next_send += frame_seconds
+                delay = next_send - loop.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        finally:
+            self._speaking = False
+            logger.info(
+                "[AUDIO] chunks sent=%s call_id=%s streamSid=%s",
+                chunks_sent,
+                self.call_id,
+                self.stream_sid,
             )
-            # In Echtzeit-Kadenz senden (statt alles auf einmal): nur so
-            # bleibt waehrend der Wiedergabe ein tatsaechliches Zeitfenster,
-            # in dem Barge-In die restliche, noch nicht gesendete Antwort
-            # abbrechen kann, bevor sie beim Anrufer ankommt.
-            next_send += frame_seconds
-            delay = next_send - loop.time()
-            if delay > 0:
-                await asyncio.sleep(delay)
 
     async def _send_clear(self) -> None:
         await self.ws.send_text(json.dumps({"event": "clear", "streamSid": self.stream_sid}))

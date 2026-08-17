@@ -17,6 +17,7 @@ import app.main as app_main
 from core.config import get_settings
 from database.database import get_session_factory, reset_engine_for_tests
 from database.repository import CallRepository, DoNotCallRepository
+from services.greeting_audio import PreparedGreeting
 
 
 class FakeTwilioProvider:
@@ -31,7 +32,12 @@ class FakeTwilioProvider:
         FakeTwilioProvider.verify_calls += 1
         return FakeTwilioProvider.verify_result
 
-    def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
+    def start_outbound_call(
+        self,
+        to_number: str,
+        twiml_webhook_url: str,
+        status_callback_url: str | None = None,
+    ) -> str:
         FakeTwilioProvider.calls_made.append((to_number, twiml_webhook_url))
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
@@ -55,6 +61,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWILIO_CALLER_ID", "+491700000000")
     monkeypatch.setenv("TWILIO_PUBLIC_BASE_URL", "https://example-tunnel.test")
     monkeypatch.setattr(telephony_module, "TwilioProvider", FakeTwilioProvider)
+    async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
+        path = tmp_path / f"greeting_{call_id}.wav"
+        path.write_bytes(b"RIFF" + (b"\x00" * 80))
+        return PreparedGreeting(text="Hallo", path=path, bytes=path.stat().st_size)
+
+    monkeypatch.setattr(telephony_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
     # Default: Tunnel gilt als erreichbar (die echte Pruefung wuerde gegen
     # die Fake-URL oben sonst 5s in einen DNS-Fehler laufen) - dedizierte
     # Tests unten ueberschreiben dies gezielt, um die neue Sicherheitspruefung

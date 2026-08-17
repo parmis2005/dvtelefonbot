@@ -16,6 +16,7 @@ from core.config import get_settings
 from database.database import get_session_factory, reset_engine_for_tests
 from database.models import CallResult, CallStatus
 from database.repository import CallRepository, LeadRepository
+from services.greeting_audio import PreparedGreeting
 
 
 class FakeTwilioProvider:
@@ -24,7 +25,12 @@ class FakeTwilioProvider:
     def __init__(self, account_sid: str, auth_token: str, caller_id: str):
         pass
 
-    def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
+    def start_outbound_call(
+        self,
+        to_number: str,
+        twiml_webhook_url: str,
+        status_callback_url: str | None = None,
+    ) -> str:
         FakeTwilioProvider.calls_made.append((to_number, twiml_webhook_url))
         return f"CAfake{len(FakeTwilioProvider.calls_made)}"
 
@@ -46,6 +52,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWILIO_PUBLIC_BASE_URL", "https://example-tunnel.test")
     monkeypatch.setattr(calls_module, "TwilioProvider", FakeTwilioProvider)
     monkeypatch.setattr(calls_module, "check_webhook_reachable", _fake_webhook_reachable)
+    async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
+        return PreparedGreeting(text="Hallo", path=tmp_path / "greeting.wav", bytes=84)
+
+    monkeypatch.setattr(calls_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
     get_settings.cache_clear()
 
     asyncio.run(reset_engine_for_tests())

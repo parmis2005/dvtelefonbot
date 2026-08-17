@@ -29,6 +29,7 @@ from database.models import CallResult, CallStatus, CampaignStatus
 from database.repository import CallRepository, CampaignRepository, LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
+from services.greeting_audio import prepare_greeting_audio
 from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
@@ -248,9 +249,22 @@ class CampaignManager:
             lead_id=lead_id, campaign_id=campaign_id, status=CallStatus.CREATED
         )
         webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
+        status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
+        try:
+            await prepare_greeting_audio(session, lead_id=lead_id, call_id=call.id)
+        except Exception as exc:
+            logger.error(
+                "Kampagne %s: Begruessungs-Audio fuer Lead %s fehlgeschlagen: %s",
+                campaign_id,
+                lead_id,
+                exc,
+            )
+            await call_repo.mark_ended(call.id, CallStatus.FAILED, result=CallResult.UNKNOWN)
+            return
+
         try:
             call_sid = await asyncio.get_event_loop().run_in_executor(
-                None, provider.start_outbound_call, lead.telefonnummer, webhook_url
+                None, provider.start_outbound_call, lead.telefonnummer, webhook_url, status_callback_url
             )
             await call_repo.update(call.id, twilio_call_sid=call_sid)
             logger.info(

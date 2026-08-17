@@ -39,6 +39,7 @@ from database.repository import CallRepository
 from phone.twilio_media_handler import TwilioMediaStreamSession
 from phone.twilio_voice import TwilioProvider
 from services.call_service import CallService
+from services.tts_cache import ensure_cached_tts
 from tools.call_tools import ToolExecutor
 from voice.stt.whisper_cpp import LocalWhisperProvider
 
@@ -76,6 +77,14 @@ async def _validate_twilio_request(request: Request, form: dict) -> None:
 async def twilio_voice_webhook(request: Request, call_id: int = Query(...)) -> Response:
     form = dict(await request.form())
     await _validate_twilio_request(request, form)
+    twilio_call_sid = form.get("CallSid")
+    call_status = form.get("CallStatus")
+    logger.info(
+        "[CALL] incoming Twilio callback callSid=%s call_id=%s status=%s",
+        twilio_call_sid,
+        call_id,
+        call_status,
+    )
 
     settings = get_settings()
     # call_id steht zusaetzlich als Query-Param in der URL (guenstiger,
@@ -96,8 +105,15 @@ async def twilio_status_webhook(request: Request, call_id: int = Query(...)) -> 
     await _validate_twilio_request(request, form)
 
     call_status = form.get("CallStatus", "")
+    twilio_call_sid = form.get("CallSid")
     mapped = _TWILIO_STATUS_MAP.get(call_status)
-    logger.info("Twilio-Status fuer Call %s: %s -> %s", call_id, call_status, mapped)
+    logger.info(
+        "[CALL] incoming Twilio status callback callSid=%s call_id=%s status=%s mapped=%s",
+        twilio_call_sid,
+        call_id,
+        call_status,
+        mapped,
+    )
 
     if mapped is None:
         return {"ok": True}
@@ -105,6 +121,10 @@ async def twilio_status_webhook(request: Request, call_id: int = Query(...)) -> 
     settings = get_settings()
     session_factory = get_session_factory()
     async with session_factory() as session:
+        if twilio_call_sid:
+            call = await CallRepository(session).get(call_id)
+            if call is not None and call.twilio_call_sid != twilio_call_sid:
+                await CallRepository(session).update(call_id, twilio_call_sid=twilio_call_sid)
         call_service = CallService(session, settings)
         if mapped == CallStatus.BUSY:
             await call_service.mark_busy(call_id)
@@ -132,14 +152,22 @@ async def _await_start_event(websocket: WebSocket) -> dict:
         raw = await websocket.receive_text()
         msg = json.loads(raw)
         if msg.get("event") == "start":
+            start = msg.get("start", {})
+            logger.info(
+                "[WS] start received streamSid=%s callSid=%s",
+                start.get("streamSid"),
+                start.get("callSid"),
+            )
             return msg
         if msg.get("event") == "connected":
+            logger.info("[WS] connected")
             continue
 
 
 @router.websocket("/media-stream")
 async def twilio_media_stream(websocket: WebSocket) -> None:
     await websocket.accept()
+    logger.info("[WS] connected")
 
     try:
         start_msg = await _await_start_event(websocket)
@@ -174,6 +202,8 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             logger.error("Media Stream fuer unbekannten Call %s - schliesse Verbindung", call_id)
             await websocket.close(code=4404)
             return
+        if twilio_call_sid and call.twilio_call_sid != twilio_call_sid:
+            await CallRepository(session).update(call_id, twilio_call_sid=twilio_call_sid)
 
         # Mit Session: liest Dashboard-Ueberschreibungen (Agent-Name/Firma/
         # Standort/Wartezeit/Stille-Timeout/Cooldown, siehe
@@ -191,10 +221,24 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             settings.whisper_cpp_binary, settings.whisper_model_path, settings.whisper_language
         )
         tts = await get_tts_provider(session)
+        opening = dario.opening_line()
+        call_service = CallService(session, settings)
+        try:
+            greeting_audio = await ensure_cached_tts(tts, opening, label="greeting", call_id=call_id)
+        except Exception:
+            logger.exception(
+                "Begruessungs-Audio im Media-Stream fehlgeschlagen (Call %s)",
+                call_id,
+            )
+            await call_service.mark_failed(call_id)
+            try:
+                await websocket.close(code=1011)
+            except RuntimeError:
+                pass
+            return
         twilio_provider = TwilioProvider(
             settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_caller_id
         )
-        call_service = CallService(session, settings)
 
         session_handler = TwilioMediaStreamSession(
             websocket=websocket,
@@ -208,6 +252,7 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             twilio_call_sid=twilio_call_sid,
             silence_timeout_ms=int(settings.silence_timeout * 1000),
             wait_timeout_seconds=settings.wait_timeout,
+            greeting_audio_path=str(greeting_audio.path),
         )
         try:
             await session_handler.run()

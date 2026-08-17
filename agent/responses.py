@@ -33,10 +33,14 @@ class ResponseBank:
         # Teil der Signatur fuer Konsistenz mit den uebrigen ResponseBank-
         # Methoden und moegliche kuenftige Personalisierung.
         del lead
+        location = (
+            "Mönchengladbach"
+            if self.company_location.lower() == "moenchengladbach"
+            else self.company_location
+        )
         return (
-            f"Guten Tag! Hier ist {self.agent_name}, der digitale Assistent von "
-            f"{self.company_name} aus {self.company_location}. Haben Sie gerade "
-            "einen Moment Zeit?"
+            f"Guten Tag! Hier ist {self.agent_name} der digitale Assistent von "
+            f"{self.company_name} aus {location}. Haben Sie.. gerade einen Moment Zeit???"
         )
 
     def gatekeeper_ask_responsible(self) -> str:

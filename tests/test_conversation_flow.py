@@ -22,8 +22,8 @@ async def test_opening_line_matches_mandated_greeting():
     opening = engine.opening_line(ctx)
 
     assert opening == (
-        "Guten Tag! Hier ist Dario, der digitale Assistent von Digital Vision aus "
-        "Moenchengladbach. Haben Sie gerade einen Moment Zeit?"
+        "Guten Tag! Hier ist Dario der digitale Assistent von Digital Vision aus "
+        "Mönchengladbach. Haben Sie.. gerade einen Moment Zeit???"
     )
 
 

@@ -130,6 +130,28 @@ async def _feed_conversation(
     ws.push_disconnect()
 
 
+async def _feed_media_only_during_greeting_generation(
+    ws: FakeTwilioWebSocket, stream_sid: str, call_sid: str, call_id: int
+) -> None:
+    ws.push({"event": "connected"})
+    ws.push(
+        {
+            "event": "start",
+            "start": {
+                "streamSid": stream_sid,
+                "callSid": call_sid,
+                "customParameters": {"call_id": str(call_id)},
+            },
+        }
+    )
+    for _ in range(5):
+        ws.push(_make_media_event(stream_sid))
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.5)
+    ws.push({"event": "stop"})
+    ws.push_disconnect()
+
+
 def _write_minimal_wav(path: str) -> str:
     with wave.open(path, "wb") as f:
         f.setnchannels(1)
@@ -302,6 +324,53 @@ async def test_full_call_greeting_turn_and_natural_farewell(
     assert any(t["speaker"] == "dario" for t in turns)
     assert any(t["speaker"] == "kunde" for t in turns)
     assert call.summary is not None
+
+
+@pytest.mark.asyncio
+async def test_customer_audio_during_tts_generation_does_not_cancel_greeting(
+    db_session,
+    scripted_stt,
+    fake_twilio_end_call,
+    short_utterance_timeout,
+    monkeypatch,
+):
+    """Regression fuer echte stille Calls: `_speaking` darf erst waehrend
+    tatsaechlichem WebSocket-Playback aktiv sein. Wenn schon die Chatterbox-
+    Generierung als "Sprechen" zaehlt, triggert ein fruehes "Hallo?" des
+    Kunden Barge-In, bevor Dario ueberhaupt Audio gesendet hat."""
+
+    async def delayed_synthesize(self, text: str, output_path: str) -> str:
+        await asyncio.sleep(0.2)
+        return _write_minimal_wav(output_path)
+
+    monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", delayed_synthesize)
+    monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(
+        twilio_media_handler.VoiceActivityDetector,
+        "is_speech",
+        lambda self, frame, sample_rate: True,
+    )
+
+    _lead_id, call_id = await _seed_call(db_session)
+    scripted_stt([""])
+
+    ws = FakeTwilioWebSocket()
+    stream_sid = "MZspeechduringgeneration"
+    call_sid = "CAspeechduringgeneration"
+
+    feeder = asyncio.create_task(
+        _feed_media_only_during_greeting_generation(ws, stream_sid, call_sid, call_id)
+    )
+    await twilio_api.twilio_media_stream(ws)
+    feeder.cancel()
+    try:
+        await feeder
+    except asyncio.CancelledError:
+        pass
+
+    media_events = [m for m in ws.sent_messages if m.get("event") == "media"]
+    assert media_events, "Fruehe Kundengeraeusche duerfen die Begruessung nicht vorab abbrechen"
+    assert not any(m.get("event") == "clear" for m in ws.sent_messages)
 
 
 @pytest.mark.asyncio

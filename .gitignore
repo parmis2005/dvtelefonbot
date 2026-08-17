@@ -19,6 +19,7 @@ dist/
 # runtime data - never commit real leads/calls/secrets
 data/*.db
 data/*.sqlite3
+data/tts_cache/
 logs/*.log
 transcripts/*.json
 transcripts/*.txt
