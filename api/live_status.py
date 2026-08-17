@@ -64,7 +64,10 @@ async def _active_calls_payload() -> list[dict]:
 @router.websocket("/ws/live-status")
 async def live_status_ws(websocket: WebSocket) -> None:
     session_token = websocket.cookies.get("dario_dashboard_session")
-    if not is_session_valid(session_token):
+    session_factory = get_session_factory()
+    async with session_factory() as db_session:
+        valid = await is_session_valid(db_session, session_token)
+    if not valid:
         await websocket.close(code=4401)
         return
 

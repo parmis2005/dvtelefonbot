@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC
+from typing import Annotated
 
-from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import (
     SESSION_COOKIE_NAME,
@@ -15,8 +17,11 @@ from core.auth import (
     verify_credentials,
 )
 from core.config import get_settings
+from database.database import get_db_session
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 class LoginRequest(BaseModel):
@@ -25,11 +30,11 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(payload: LoginRequest, response: Response) -> dict:
+async def login(payload: LoginRequest, response: Response, session: DbSession) -> dict:
     if not verify_credentials(payload.username, payload.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login fehlgeschlagen")
     settings = get_settings()
-    token, expires_at = create_session()
+    token, expires_at = await create_session(session)
     # Wichtig: expires_at als datetime uebergeben, NICHT als int-Timestamp -
     # Python's http.cookies behandelt einen rohen int bei "expires" als
     # Sekunden-Offset AB JETZT (nicht als absoluten Unix-Timestamp), was
@@ -50,14 +55,16 @@ async def login(payload: LoginRequest, response: Response) -> dict:
 
 @router.post("/logout")
 async def logout(
-    response: Response, dario_dashboard_session: str | None = Cookie(default=None)
+    response: Response,
+    session: DbSession,
+    dario_dashboard_session: str | None = Cookie(default=None),
 ) -> dict:
     if dario_dashboard_session:
-        revoke_session(dario_dashboard_session)
+        await revoke_session(session, dario_dashboard_session)
     response.delete_cookie(SESSION_COOKIE_NAME)
     return {"ok": True}
 
 
 @router.get("/me")
-async def me(dario_dashboard_session: str | None = Cookie(default=None)) -> dict:
-    return {"authenticated": is_session_valid(dario_dashboard_session)}
+async def me(session: DbSession, dario_dashboard_session: str | None = Cookie(default=None)) -> dict:
+    return {"authenticated": await is_session_valid(session, dario_dashboard_session)}

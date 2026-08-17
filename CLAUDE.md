@@ -549,3 +549,54 @@ schnellere, aber synthetischer klingende Alternative bestehen
   bestehenden `test_full_call_greeting_turn_and_natural_farewell` sicher,
   dass reine Stille (echte WebRTC-VAD, nicht gemockt) KEIN falsches
   Barge-In (kein "clear"-Event) ausloest.
+- **Dashboard-Sessions wurden vom Nutzer als "wirft mich teilweise beim
+  Bedienen zurueck auf die Login-Seite" gemeldet - Root Cause: zwei separate
+  Probleme, beide behoben.**
+  1. `core/auth.py::_sessions` war ein reines In-Memory-`dict` - jeder
+     Neustart/Reload des Backend-Prozesses (z.B. `uvicorn --reload` waehrend
+     normaler Entwicklung/Wartung, oder ein spaeterer Deploy) hat dadurch
+     JEDE angemeldete Session augenblicklich unwiderruflich invalidiert,
+     ohne dass der Nutzer etwas falsch gemacht haette - beim naechsten Klick
+     kam serverseitig ein echtes, "korrektes" 401 zurueck, das die
+     Frontend-Logik (zu Recht) als Logout behandelte. Behoben durch
+     `database/models.py::DashboardSession` (neue Tabelle) +
+     `database/repository.py::DashboardSessionRepository` -
+     `core/auth.py::create_session/revoke_session/is_session_valid` sind
+     jetzt async und persistieren in der DB statt in einem prozesslokalen
+     Dict. Sicherheitseigenschaften unveraendert: weiterhin ein opakes,
+     kryptographisch zufaelliges Token, weiterhin serverseitig
+     durchgesetzte TTL (`DASHBOARD_SESSION_TTL_HOURS`), weiterhin sofortige
+     Invalidierung bei explizitem Logout. Mit einem echten Prozess-Neustart
+     (nicht nur simuliert) gegen den lokal laufenden Server verifiziert:
+     Login, dann `kill` + Neustart von `uvicorn --reload`, danach war
+     dasselbe Cookie weiterhin gueltig (`GET /api/auth/me` -> `{"authenticated":
+     true}`) - vorher waere das ein 401 gewesen. Permanent als
+     `tests/test_auth.py::test_session_survives_backend_restart`
+     abgesichert (zwei komplett unabhaengige FastAPI-App-/TestClient-
+     Instanzen gegen dieselbe SQLite-Datei, kein gemeinsamer Python-Zustand).
+  2. `frontend/src/lib/auth-context.tsx` behandelte JEDEN fehlgeschlagenen
+     `fetch` von `/api/auth/me` (Backend kurzzeitig nicht erreichbar,
+     Netzwerkfehler, ausgerechnet waehrend eines Reload-Neustarts) als
+     bestaetigten Logout (`authenticated = error ? false : ...`) - obwohl
+     das Backend dabei ueberhaupt nicht geantwortet hat, also nichts
+     "bestaetigt" war. `GET /api/auth/me` liefert IMMER 200 mit
+     `{authenticated: bool}`; nur eine echte `false`-Antwort darf laut
+     Auftrag zum Redirect fuehren. Behoben: `authenticated` wird nur noch
+     aus einem tatsaechlich empfangenen `data.authenticated` abgeleitet, nie
+     aus `error`; SWR versucht fehlgeschlagene Pruefungen jetzt zusaetzlich
+     automatisch erneut (`errorRetryCount`, Fokus-/Reconnect-Revalidierung),
+     statt nach dem ersten Fehler dauerhaft im Fehlerzustand haengen zu
+     bleiben.
+  - Der zentrale Fetch-Client (`frontend/src/lib/api.ts`) selbst war schon
+    vorher korrekt: Netzwerkfehler (fetch() wirft, bevor eine `response`
+    existiert) durchlaufen den 401-Redirect-Zweig nicht - nur eine ECHTE
+    401-Antwort von einer geschuetzten Route loest den harten Redirect aus.
+    Kein Code, kein Raw-`fetch` ausserhalb dieses zentralen Clients
+    gefunden (per Grep verifiziert) - die im Auftrag geforderte "zentrale
+    API-Client"-Struktur existierte bereits vollstaendig.
+  - Ein in einem Kommentar erwaehntes `proxy.ts` (Next.js 16s Nachfolger von
+    `middleware.ts`) existiert in diesem Projekt bewusst NICHT: das
+    Session-Cookie ist nur fuer die Backend-Origin sichtbar, ein
+    serverseitiges Next.js-Proxy koennte es gar nicht lesen - die
+    Durchsetzung passiert ausschliesslich im Backend, der Kommentar war
+    veraltet/irrefuehrend und wurde korrigiert.

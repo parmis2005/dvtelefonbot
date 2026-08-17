@@ -13,10 +13,18 @@ export class ApiError extends Error {
 }
 
 /**
- * Zentraler Fetch-Wrapper: sendet immer credentials (httpOnly Session-Cookie,
- * siehe core/auth.py) und leitet bei 401 direkt zur Login-Seite um - die
- * eigentliche Session-Pruefung passiert ausschliesslich serverseitig im
- * Backend, proxy.ts prueft nur oberflaechlich auf Vorhandensein des Cookies.
+ * Zentraler Fetch-Wrapper - jede Seite/Komponente ruft ausschliesslich
+ * `api.get/post/patch/put/delete/postForm` auf, nie `fetch` direkt (siehe
+ * README/CLAUDE.md), damit Credentials/Fehlerbehandlung an genau einer
+ * Stelle korrekt sind. Sendet immer `credentials: "include"` (httpOnly
+ * Session-Cookie, core/auth.py) und leitet bei einer ECHTEN 401-Antwort
+ * (das Backend hat die Session ausdruecklich als ungueltig bestaetigt,
+ * core/auth.py::require_auth) direkt zur Login-Seite um. Ein Netzwerkfehler
+ * (fetch() wirft, bevor ueberhaupt eine `response` existiert - z.B. Backend
+ * kurzzeitig nicht erreichbar) durchlaeuft diesen 401-Zweig NICHT und loest
+ * daher auch keinen Redirect aus; er propagiert als normale Exception an die
+ * aufrufende Stelle (siehe auch src/lib/auth-context.tsx fuer denselben
+ * Grundsatz beim initialen Session-Check).
  */
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {

@@ -228,3 +228,21 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class DashboardSession(Base):
+    """Dashboard-Login-Session (core/auth.py). Bewusst in der DB statt nur
+    In-Memory: ein Neustart/Reload des Backend-Prozesses (z.B. `uvicorn
+    --reload` waehrend der Entwicklung, oder ein Deploy) darf einen bereits
+    angemeldeten Nutzer nicht kommentarlos aus dem Dashboard werfen - eine
+    In-Memory-Session ueberlebt das nicht. Sicherheit bleibt dabei gewahrt:
+    das Token ist weiterhin ein opakes, kryptographisch zufaelliges Secret
+    (core/auth.py::create_session), die Ablaufzeit wird weiterhin
+    serverseitig durchgesetzt (expires_at), und ein expliziter Logout
+    loescht die Zeile sofort."""
+
+    __tablename__ = "dashboard_sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

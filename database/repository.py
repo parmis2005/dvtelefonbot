@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
@@ -19,6 +19,7 @@ from database.models import (
     CallStatus,
     Campaign,
     CampaignStatus,
+    DashboardSession,
     DoNotCall,
     Lead,
     LeadStatus,
@@ -459,3 +460,41 @@ class AppSettingRepository:
     async def set_many(self, values: dict[str, str]) -> None:
         for key, value in values.items():
             await self.set(key, value)
+
+
+class DashboardSessionRepository:
+    """Persistenter Speicher fuer Dashboard-Login-Sessions (core/auth.py) -
+    siehe database/models.py::DashboardSession fuer die Begruendung, warum
+    dies nicht nur In-Memory gehalten wird."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, token: str, expires_at: datetime) -> DashboardSession:
+        row = DashboardSession(token=token, expires_at=expires_at)
+        self.session.add(row)
+        await self.session.commit()
+        return row
+
+    async def get_valid(self, token: str) -> DashboardSession | None:
+        row = await self.session.get(DashboardSession, token)
+        if row is None:
+            return None
+        if row.expires_at < datetime.utcnow():
+            await self.session.delete(row)
+            await self.session.commit()
+            return None
+        return row
+
+    async def delete(self, token: str) -> None:
+        await self.session.execute(delete(DashboardSession).where(DashboardSession.token == token))
+        await self.session.commit()
+
+    async def delete_expired(self) -> None:
+        """Beilaeufiges Aufraeumen abgelaufener Zeilen (z.B. bei jedem
+        Login-Versuch aufgerufen) - keine eigene Cron-Infrastruktur noetig
+        fuer eine so kleine, seltene Tabelle."""
+        await self.session.execute(
+            delete(DashboardSession).where(DashboardSession.expires_at < datetime.utcnow())
+        )
+        await self.session.commit()

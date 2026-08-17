@@ -214,3 +214,111 @@ def test_csv_import_preview_and_confirm(client):
 
     leads = client.get("/api/leads").json()
     assert any(lead_row["unternehmen"] == "Beispiel GmbH" for lead_row in leads)
+
+
+def test_full_dashboard_usage_flow_keeps_same_session_authenticated(client):
+    """Simuliert Abschnitt 11 des Auftrags ("Browser-Flow testen") auf
+    API-Ebene mit EINEM einzigen eingeloggten Client (= EINER Browser-
+    Session): Login -> Uebersicht-Daten -> Kontakt anlegen/bearbeiten ->
+    Prompt speichern -> Stimme laden/aktivieren -> Telefonie-Status ->
+    Einstellungen speichern -> zurueck zur Uebersicht. Nach jedem einzelnen
+    Schritt wird zusaetzlich `/api/auth/me` geprueft - die Session darf zu
+    KEINEM Zeitpunkt in diesem Ablauf verloren gehen (Kern des gemeldeten
+    Fehlers: "sobald ich bestimmte Funktionen benutze, werde ich teilweise
+    wieder auf die Login-Seite geworfen"). Prueft ausserdem, dass jede
+    Schreiboperation tatsaechlich persistiert wurde (nicht nur 200 OK
+    zurueckgibt), also wirklich mit dem Backend verbunden ist statt einer
+    Mock-Funktion."""
+    _login(client)
+
+    def assert_still_authenticated() -> None:
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json() == {"authenticated": True}
+
+    assert_still_authenticated()
+
+    # --- Uebersicht: mehrere Datenquellen parallel geladen -----------------
+    assert client.get("/api/leads").status_code == 200
+    assert client.get("/api/calls").status_code == 200
+    assert client.get("/api/telephony/status").status_code == 200
+    assert client.get("/api/prompt-versions").status_code == 200
+    assert client.get("/api/voices").status_code == 200
+    assert_still_authenticated()
+
+    # --- Kontakte: anlegen, bearbeiten ---------------------------------
+    created = client.post(
+        "/api/leads",
+        json={
+            "unternehmen": "Flow-Test GmbH",
+            "ansprechpartner": "Herr Ablauf",
+            "telefonnummer": "+491709999999",
+        },
+    )
+    assert created.status_code == 201, created.text
+    lead_id = created.json()["id"]
+
+    edited = client.patch(f"/api/leads/{lead_id}", json={"notizen": "Im Flow-Test bearbeitet"})
+    assert edited.status_code == 200
+    assert edited.json()["notizen"] == "Im Flow-Test bearbeitet"
+
+    reloaded_lead = client.get(f"/api/leads/{lead_id}").json()
+    assert reloaded_lead["lead"]["notizen"] == "Im Flow-Test bearbeitet"
+    assert_still_authenticated()
+
+    # --- Prompt: speichern --------------------------------------------
+    prompt_saved = client.post(
+        "/api/prompt-versions", json={"content": "Flow-Test-Prompt", "label": "Flow-Test"}
+    )
+    assert prompt_saved.status_code == 201
+    active_prompt = client.get("/api/prompt-versions/active")
+    assert active_prompt.json()["content"] == "Flow-Test-Prompt"
+    assert_still_authenticated()
+
+    # --- Stimme: laden, aktivieren (Chatterbox-Modell selbst wird hier
+    # bewusst NICHT angesprochen - siehe test_voices_api.py fuer die
+    # gemockte TTS-Provider-Grenze) --------------------------------------
+    voices = client.get("/api/voices").json()
+    assert len(voices) >= 1
+    builtin_voice_id = voices[0]["id"]
+    activated = client.post(f"/api/voices/{builtin_voice_id}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["is_active"] is True
+    assert_still_authenticated()
+
+    # --- Telefonie: Status abrufen --------------------------------------
+    telephony_status = client.get("/api/telephony/status")
+    assert telephony_status.status_code == 200
+    assert_still_authenticated()
+
+    # --- Einstellungen: speichern und Persistenz verifizieren -----------
+    updated_settings = client.put(
+        "/api/settings",
+        json={
+            "values": {
+                "agent_name": "Flow-Test-Dario",
+                "company_name": "Digital Vision",
+                "company_location": "Moenchengladbach",
+                "wait_timeout_seconds": "30",
+                "silence_timeout_seconds": "9",
+                "call_cooldown_seconds": "3600",
+                "campaign_default_concurrency": "5",
+                "campaign_max_concurrency": "10",
+                "campaign_pause_between_calls_seconds": "0",
+            }
+        },
+    )
+    assert updated_settings.status_code == 200
+    reloaded_settings = client.get("/api/settings").json()
+    assert reloaded_settings["values"]["agent_name"] == "Flow-Test-Dario"
+    assert reloaded_settings["values"]["wait_timeout_seconds"] == "30"
+    assert_still_authenticated()
+
+    # --- zurueck zur Uebersicht: Daten inklusive der neuen Aenderungen ---
+    final_leads = client.get("/api/leads").json()
+    assert any(lead_row["id"] == lead_id for lead_row in final_leads)
+    assert_still_authenticated()
+
+    # Am Ende immer noch dieselbe Session - kein einziger Schritt hat einen
+    # (faelschlichen) Logout ausgeloest.
+    assert client.get("/api/leads").status_code == 200
