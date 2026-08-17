@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.calls import router as calls_router
 from api.leads import router as leads_router
+from api.twilio import router as twilio_router
 from core.config import get_settings
 from core.logging import configure_logging, get_logger
 from dashboard.routes import router as dashboard_router
@@ -46,6 +47,7 @@ app = FastAPI(
 
 app.include_router(leads_router)
 app.include_router(calls_router)
+app.include_router(twilio_router)
 app.include_router(dashboard_router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     asterisk_sip_trunk: str = "default_trunk"
     asterisk_caller_id: str = ""
 
+    # Twilio Programmable Voice (alternativer Telefonie-Provider zu Asterisk,
+    # siehe phone/twilio_voice.py). TWILIO_PUBLIC_BASE_URL muss von aussen
+    # erreichbar sein (z.B. ngrok-Tunnel) - Twilio ruft darueber unseren
+    # TwiML-Webhook und die Media-Stream-WebSocket auf.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_caller_id: str = ""
+    twilio_test_number: str = ""
+    twilio_public_base_url: str = ""
+    twilio_validate_signature: bool = True
+
     # SMTP
     smtp_host: str = ""
     smtp_port: int = 587
@@ -105,6 +116,7 @@ class Settings(BaseSettings):
             "smtp": bool(self.smtp_host and self.smtp_username and self.smtp_password),
             "asterisk": bool(self.asterisk_username and self.asterisk_password),
             "whatsapp": bool(self.whatsapp_api_url and self.whatsapp_api_token),
+            "twilio": bool(self.twilio_account_sid and self.twilio_auth_token),
         }
 
 

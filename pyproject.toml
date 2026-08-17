@@ -22,16 +22,23 @@ dependencies = [
     "aiohttp>=3.10",
     "websockets>=13.0",
     "numpy>=1.26",
+    "scipy>=1.11",
+    "twilio>=9.0",
+    # webrtcvad + soundfile: von phone/twilio_media_handler.py auf Modulebene
+    # importiert (api/twilio.py wird immer in app/main.py eingebunden) - daher
+    # Kernabhaengigkeit, nicht Teil des optionalen "voice"-Extras.
+    "soundfile>=0.12",
+    "webrtcvad>=2.0.10",
+    # webrtcvad (unmaintained) importiert pkg_resources beim Laden;
+    # setuptools >=81 hat das entfernt. Pin bis webrtcvad das behebt.
+    "setuptools<81",
 ]
 
 [project.optional-dependencies]
 voice = [
+    # sounddevice: nur fuer lokalen Mikrofon-/Lautsprecher-Test (local_voice_test.py) -
+    # fuer Twilio-Telefonie nicht noetig, da Audio ueber das Netzwerk laeuft.
     "sounddevice>=0.4.7",
-    "soundfile>=0.12",
-    "webrtcvad>=2.0.10",
-    # webrtcvad (unmaintained) imports pkg_resources at module load time;
-    # setuptools >=81 removed it. Pin until webrtcvad is replaced/patched.
-    "setuptools<81",
     "piper-tts>=1.2",  # liefert das `piper` CLI-Binary fuer LocalTTSProvider
 ]
 chatterbox = [

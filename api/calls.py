@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.dario import Dario
-from app.bootstrap import build_app_context, build_tts_provider
+from app.bootstrap import build_app_context, get_tts_provider
 from core.config import get_settings
 from database.database import get_db_session
 from database.models import Call
@@ -92,7 +92,7 @@ async def create_call(payload: CallCreate, session: DbSession) -> CallOut:
         from voice.stt.whisper_cpp import LocalWhisperProvider
 
         stt = LocalWhisperProvider(settings.whisper_cpp_binary, settings.whisper_model_path, settings.whisper_language)
-        tts = build_tts_provider(settings)
+        tts = get_tts_provider()
 
         async with AsteriskProvider(
             settings.asterisk_ari_url,

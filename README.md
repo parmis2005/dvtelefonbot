@@ -255,7 +255,61 @@ Ohne laufenden/erreichbaren Asterisk-Server antwortet der Endpunkt ehrlich
 mit `502` und einer Fehlermeldung - es wird nie ein erfolgreicher Call
 vorgetaeuscht.
 
-## 15. Fehlerdiagnose
+## 15. Twilio verbinden (Alternative zu Asterisk)
+
+Twilio Programmable Voice ist eine zweite, unabhaengige Telefonie-Anbindung
+(`phone/twilio_voice.py`, `phone/twilio_media_handler.py`, `api/twilio.py`) -
+kein SIP-Trunk/PBX-Setup noetig, dafuer ist ein oeffentlich erreichbarer
+Server Pflicht (Twilio muss deinen Rechner uebers Internet erreichen).
+Nutzt exakt dieselbe Dario-Engine wie Asterisk/Text-/Voice-Test.
+
+**1. `.env` befuellen** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_CALLER_ID` = deine verifizierte Twilio-Nummer, `TWILIO_TEST_NUMBER`).
+
+**2. Server starten:**
+
+```bash
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-ping-interval 30 --ws-ping-timeout 120
+```
+
+Die laengeren Ping-Timeouts sind bewusst: Chatterbox braucht auf CPU pro
+Antwort ca. 15-45s reine Generierungszeit; mit den Standard-Timeouts (20s)
+wertet die WebSocket-Verbindung das faelschlich als tot und trennt mitten in
+Darios Antwort (siehe CLAUDE.md "Grenzen der aktuellen Version"). Mit
+`TTS_PROVIDER=local_piper` sind die Standard-Timeouts unproblematisch.
+
+**3. Oeffentlichen Tunnel starten** (zweites Terminal):
+
+```bash
+ngrok http 8000
+```
+
+Einmalig einen kostenlosen ngrok-Account samt Authtoken einrichten
+(`ngrok config add-authtoken <dein-token>`, siehe https://dashboard.ngrok.com).
+Die angezeigte `https://....ngrok-free.app`-URL (ohne abschliessenden Slash)
+in `.env` als `TWILIO_PUBLIC_BASE_URL` eintragen. Bei jedem Neustart von
+`ngrok http` aendert sich die URL (kostenloser Plan) - `.env` entsprechend
+aktualisieren.
+
+**4. Testanruf vorbereiten und ausloesen** (drittes Terminal):
+
+```bash
+python -m app.twilio_test_call
+```
+
+Prueft Zugangsdaten und Erreichbarkeit des Webhooks, zeigt eine
+Zusammenfassung und fragt explizit `Jetzt wirklich anrufen? Tippe 'ja' zum
+Bestaetigen:` - erst nach Eingabe von `ja` wird der echte, kostenpflichtige
+Anruf ausgeloest. Sobald abgenommen wird, verbindet Twilio den Call an
+Darios Media-Stream-WebSocket (`/twilio/media-stream`) - STT, Conversation
+Engine und TTS laufen dann in Echtzeit genau wie im lokalen Voice-Test.
+
+Call-Status, Transkript und Zusammenfassung landen wie gewohnt in der
+Datenbank/im Dashboard (`services/call_service.py`,
+`services/transcript_service.py`, `services/summary_service.py`).
+
+## 16. Fehlerdiagnose
 
 | Symptom | Wahrscheinliche Ursache | Loesung |
 |---|---|---|
@@ -269,6 +323,10 @@ vorgetaeuscht.
 | E-Mail wird nie als "gesendet" bestaetigt | SMTP-Zugangsdaten fehlen/falsch (`.env`) | `SMTP_*` Variablen pruefen; das ist bewusstes Verhalten (kein falscher Versand-Claim) |
 | `pytest` findet `webrtcvad`-Importfehler | `pkg_resources` fehlt (neue `setuptools`-Version) | `pip install -e ".[voice]"` installiert automatisch `setuptools<81` |
 | Anruf wird trotz "nicht mehr anrufen" erneut versucht | Sollte nicht vorkommen - Do-Not-Call ist persistent in DB | `tests/test_do_not_call.py` ausfuehren, Datenbank pruefen (`do_not_call` Tabelle) |
+| `twilio_test_call`: "TWILIO_PUBLIC_BASE_URL fehlt" | Tunnel noch nicht gestartet/eingetragen | Schritt 15.3 (ngrok), URL ohne abschliessenden Slash in `.env` |
+| `twilio_test_call`: Webhook "nicht erreichbar" (Warnung) | `uvicorn` oder `ngrok` laeuft nicht/ist abgestuerzt | Beide Terminals pruefen; Warnung blockiert den Anruf nicht, macht ihn aber sinnlos |
+| Twilio-Anruf klingelt, aber Dario bleibt stumm/Verbindung bricht ab | WebSocket-Ping-Timeout waehrend langer Chatterbox-Generierung | `--ws-ping-interval`/`--ws-ping-timeout` wie in Schritt 15.2 setzen, oder testweise `TTS_PROVIDER=local_piper` |
+| `403 Ungueltige Twilio-Signatur` auf `/twilio/voice` oder `/twilio/status` | Request kam nicht wirklich von Twilio (oder `TWILIO_PUBLIC_BASE_URL` stimmt nicht mit der tatsaechlich aufgerufenen URL ueberein) | `.env`-URL exakt mit der aktuellen ngrok-URL abgleichen |
 
 Bei allen anderen Problemen: Logs in `logs/dario.log` (strukturiert, JSON)
 sowie Konsolenausgabe pruefen. Telefonnummern werden in Logs automatisch

@@ -21,6 +21,13 @@ Telefonnetz/SIP -> Asterisk (ARI) -> Call Controller -> Audio Pipeline
   -> Speech-to-Text -> Conversation Engine -> LLM -> Text-to-Speech
   -> Asterisk -> Gespraechspartner
 
+Twilio Programmable Voice -> TwiML-Webhook -> Media-Stream-WebSocket
+  -> Speech-to-Text -> Conversation Engine -> LLM -> Text-to-Speech
+  -> Media-Stream-WebSocket -> Gespraechspartner
+  (siehe api/twilio.py, phone/twilio_media_handler.py - Cloud-Alternative
+  zu Asterisk, kein SIP-Trunk noetig, aber oeffentlicher Server/Tunnel
+  erforderlich)
+
 Conversation Engine -> Tools -> Datenbank / E-Mail / WhatsApp / Rueckruf / Do-Not-Call
 ```
 
@@ -28,12 +35,21 @@ Conversation Engine -> Tools -> Datenbank / E-Mail / WhatsApp / Rueckruf / Do-No
 Telefonie, E-Mail, WhatsApp) hat eine abstrakte Basisklasse
 (`voice/stt/base.py`, `llm/base.py`, `voice/tts/base.py`, `phone/base.py`,
 `tools/base.py`) und mindestens eine lokale Implementierung. Cloud-Provider
-koennen spaeter ergaenzt werden, ohne die Conversation Engine anzufassen.
+koennen spaeter ergaenzt werden, ohne die Conversation Engine anzufassen -
+Twilio ist das erste Beispiel dafuer: `phone/twilio_voice.py` +
+`phone/twilio_media_handler.py` nutzen dieselbe `agent/dario.py::Dario`
+Fassade wie Asterisk, ohne dass an `agent/*` etwas geaendert wurde.
 
 **Eine Conversation Engine fuer alle Kanaele**: `agent/conversation.py`
 (orchestriert durch `agent/dario.py`) wird identisch von `app/chat_test.py`,
-`app/local_voice_test.py` und dem Telefonie-Pfad (`phone/call_controller.py`)
-genutzt. Keine separate vereinfachte Logik fuer Tests.
+`app/local_voice_test.py` und beiden Telefonie-Pfaden
+(`phone/call_controller.py` fuer Asterisk, `phone/twilio_media_handler.py`
+fuer Twilio) genutzt. Keine separate vereinfachte Logik fuer Tests.
+
+**TTS-Provider sind prozessweit gecacht** (`app/bootstrap.py::get_tts_provider`,
+`@lru_cache`): wichtig fuer Chatterbox, dessen ~2GB-Modell sonst bei jedem
+einzelnen Anruf neu geladen wuerde. Bei Aenderungen an dieser Cache-Logik
+immer pruefen, dass ein neuer Anruf nicht erneut das volle Modell laedt.
 
 **Verzeichnisstruktur** (siehe auch README.md):
 ```
@@ -103,15 +119,26 @@ umgehen.
    Kalendersystem angebunden ist (`agent/guardrails.py::guard_callback`,
    `agent/responses.py::callback_without_calendar`).
 5. **end_call ist real**: `phone/call_controller.py::end_call` ruft
-   tatsaechlich `AsteriskProvider.end_call` (ARI Hangup) - kein reines
-   Setzen eines State-Feldes.
+   tatsaechlich `AsteriskProvider.end_call` (ARI Hangup); im Twilio-Pfad ruft
+   `phone/twilio_media_handler.py::_hangup_real_call` tatsaechlich die
+   Twilio-REST-API (`calls(sid).update(status="completed")`) - in beiden
+   Faellen kein reines Setzen eines State-Feldes.
 6. **Keine Fuellaute/Seufzer in TTS**: LLM-generierter Text wird vor der
    Sprachausgabe durch `agent/guardrails.py::strip_disallowed_audio_artifacts`
    bereinigt.
 7. **Keine Secrets im Repository**: Alle Zugangsdaten (SMTP, Asterisk,
-   WhatsApp) ausschliesslich in `.env` (siehe `.env.example`, niemals mit
-   echten Werten committen). `.gitignore` schliesst `.env`,
-   Laufzeitdatenbanken, Logs und Transkripte aus.
+   WhatsApp, Twilio) ausschliesslich in `.env` (siehe `.env.example`, niemals
+   mit echten Werten committen). `.gitignore` schliesst `.env`,
+   Laufzeitdatenbanken, Logs und Transkripte aus. Der Twilio-Auth-Token wird
+   nach dem einmaligen Eintragen in `.env` nirgends erneut ausgegeben/geloggt
+   (`app/twilio_test_call.py` zeigt nur den Verifizierungsstatus, nie den
+   Token selbst).
+8. **Twilio-Webhooks sind signaturgeprueft**: `POST /twilio/voice` und
+   `POST /twilio/status` validieren `X-Twilio-Signature` gegen
+   `TWILIO_AUTH_TOKEN` (`api/twilio.py::_validate_twilio_request`,
+   abschaltbar nur ueber `TWILIO_VALIDATE_SIGNATURE=false` fuer lokales
+   Debugging) - ungueltige Requests werden mit 403 abgelehnt, bevor
+   irgendein Call-Zustand veraendert wird.
 
 ## Darios Rolle
 
@@ -150,11 +177,12 @@ source .venv/bin/activate
 python -m app.chat_test             # Text-Test (kein Telefon/Audio noetig)
 python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + TTS-Provider)
 uvicorn app.main:app --reload       # API + Dashboard (http://127.0.0.1:8000)
+python -m app.twilio_test_call      # echter Twilio-Testanruf (fragt vor dem Anruf nach Bestaetigung)
 python -m scripts.import_leads_csv --file leads.csv
 ```
 
 Ausfuehrliche Setup-Schritte (Python, whisper.cpp, llama.cpp, Piper/Chatterbox,
-Asterisk/PJSIP): siehe `README.md` und `scripts/setup_mac.sh`.
+Asterisk/PJSIP, Twilio/ngrok): siehe `README.md` und `scripts/setup_mac.sh`.
 
 ## Darios Stimme (Stand: entschieden, siehe `voice/tts/chatterbox_tts.py`)
 
@@ -193,6 +221,22 @@ schnellere, aber synthetischer klingende Alternative bestehen
   Apple-Silicon-MPS derzeit inkompatibel mit Chatterbox) dauert eine einzelne
   Aeusserung ca. 25-30s reine Generierungszeit nach dem Laden. Fuer
   `local_voice_test` akzeptabel, fuer ein fluessiges Telefongespraech noch zu
-  langsam - vor einer echten Asterisk-Anbindung muss das adressiert werden
-  (z.B. GPU-Beschleunigung, kleineres/schnelleres Modell oder Piper als
-  Fallback fuer den Live-Pfad).
+  langsam - vor einer echten Asterisk-/Twilio-Anbindung im Dauerbetrieb muss
+  das adressiert werden (z.B. GPU-Beschleunigung, kleineres/schnelleres
+  Modell oder Piper als Fallback fuer den Live-Pfad).
+- **WebSocket-Ping-Timeout bei Twilio + Chatterbox**: die lange, CPU-gebundene
+  Chatterbox-Generierung (siehe oben) kann den Event-Loop lange genug
+  blockieren, dass Standard-WebSocket-Keepalive-Timeouts (~20s) die
+  Media-Stream-Verbindung faelschlich als tot werten und mitten in Darios
+  Antwort trennen. Mitigation: `uvicorn ... --ws-ping-interval 30
+  --ws-ping-timeout 120` (siehe README "Twilio verbinden"). Loest nicht die
+  eigentliche Latenzursache, verhindert aber den Verbindungsabbruch.
+- **Twilio Media Streams liefern/erwarten G.711 mu-law bei 8kHz** - deutlich
+  schmalbandiger als die uebrige Pipeline (16/22/24kHz). `voice/codecs.py`
+  konvertiert verlustbehaftet in beide Richtungen; das ist normales
+  Telefonie-Qualitätsniveau, kein Bug. Wichtig beim Debuggen von TTS-Audio
+  im Twilio-Pfad: WAV-Dateien mit 32bit-Float-Samples (Chatterbox) muessen
+  vor der int16-Wandlung explizit skaliert werden - `soundfile.read(...,
+  dtype="int16")` skaliert NICHT zuverlaessig hoch und erzeugte urspruenglich
+  fast lautloses/verrauschtes Audio auf der Leitung (siehe
+  `phone/twilio_media_handler.py::_stream_wav_file`).

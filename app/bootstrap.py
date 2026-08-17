@@ -5,6 +5,7 @@ und Telefonie-Pfad: baut Settings, Provider und die Conversation Engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from agent.conversation import ConversationEngine
 from core.config import BusinessConfig, Settings, get_business_config, get_settings
@@ -74,6 +75,19 @@ def build_tts_provider(settings: Settings) -> TextToSpeechProvider:
             reference_audio_path=settings.chatterbox_reference_audio_path or None,
         )
     raise ValueError(f"Unbekannter TTS_PROVIDER: {settings.tts_provider}")
+
+
+@lru_cache
+def get_tts_provider() -> TextToSpeechProvider:
+    """Prozessweit wiederverwendete TTS-Provider-Instanz.
+
+    Wichtig fuer Chatterbox: das Modell (~2GB) wird beim ersten Gebrauch
+    lazy geladen und danach in der Provider-Instanz zwischengehalten (siehe
+    voice/tts/chatterbox_tts.py::_get_model). Wuerde bei jedem Anruf eine neue
+    Provider-Instanz gebaut, muesste das Modell fuer JEDEN Call neu geladen
+    werden - hier daher bewusst gecacht statt bei jedem Request neu gebaut.
+    """
+    return build_tts_provider(get_settings())
 
 
 def build_app_context() -> AppContext:

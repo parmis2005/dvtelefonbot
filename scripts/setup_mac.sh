@@ -180,6 +180,20 @@ else
     fi
 fi
 
+# --- ngrok (optional, fuer Twilio-Telefonie) --------------------------------
+if command -v ngrok >/dev/null 2>&1; then
+    info "ngrok gefunden."
+else
+    warn "ngrok nicht gefunden (nur fuer Twilio-Telefonie noetig, nicht fuer Text-/Voice-Test/Asterisk)."
+    if confirm "Jetzt via Homebrew installieren (brew install ngrok)?"; then
+        brew install ngrok
+        echo "   Danach einmalig einen kostenlosen Account + Authtoken einrichten:"
+        echo "   https://dashboard.ngrok.com -> ngrok config add-authtoken <dein-token>"
+    else
+        echo "   Siehe README.md Abschnitt 'Twilio verbinden' fuer Details."
+    fi
+fi
+
 # --- .env -------------------------------------------------------------------
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
     cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
