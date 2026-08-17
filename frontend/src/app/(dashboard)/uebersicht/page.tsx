@@ -1,12 +1,13 @@
 "use client";
 
-import useSWR from "swr";
 import Link from "next/link";
+import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { useTelephonyStatus } from "@/lib/useTelephonyStatus";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
-import type { Call, Lead, PromptVersion, TelephonyStatus, VoiceProfile } from "@/lib/types";
+import type { Call, Lead, PromptVersion, VoiceProfile } from "@/lib/types";
 
 function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
@@ -34,7 +35,7 @@ function isToday(iso: string | null): boolean {
 export default function UebersichtPage() {
   const { data: leads } = useSWR<Lead[]>("/api/leads", fetcher, { refreshInterval: 15000 });
   const { data: calls } = useSWR<Call[]>("/api/calls", fetcher, { refreshInterval: 10000 });
-  const { data: telephony } = useSWR<TelephonyStatus>("/api/telephony/status", fetcher);
+  const { data: telephony } = useTelephonyStatus();
   const { data: promptVersions } = useSWR<PromptVersion[]>("/api/prompt-versions", fetcher);
   const { data: voices } = useSWR<VoiceProfile[]>("/api/voices", fetcher);
 

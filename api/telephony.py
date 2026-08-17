@@ -10,6 +10,7 @@ stille Fehlschlaege erzeugen statt echter Kontrolle."""
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +28,11 @@ from services.telephony_diagnostics import check_webhook_reachable
 router = APIRouter(prefix="/api/telephony", tags=["telephony"], dependencies=[Depends(require_auth)])
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
+_STATUS_CACHE_TTL_SECONDS = 20.0
+_status_cache: TelephonyStatusOut | None = None
+_status_cache_expires_at = 0.0
+_status_cache_signature: tuple[str, str, str, str] | None = None
+_status_cache_lock: asyncio.Lock | None = None
 
 
 def _mask_sid(sid: str) -> str:
@@ -55,8 +61,31 @@ class TestCallRequest(BaseModel):
     to_number: str
 
 
-@router.get("/status", response_model=TelephonyStatusOut)
-async def telephony_status() -> TelephonyStatusOut:
+def _get_status_cache_lock() -> asyncio.Lock:
+    global _status_cache_lock
+    if _status_cache_lock is None:
+        _status_cache_lock = asyncio.Lock()
+    return _status_cache_lock
+
+
+def clear_telephony_status_cache() -> None:
+    global _status_cache, _status_cache_expires_at, _status_cache_signature
+    _status_cache = None
+    _status_cache_expires_at = 0.0
+    _status_cache_signature = None
+
+
+def _status_signature() -> tuple[str, str, str, str]:
+    settings = get_settings()
+    return (
+        settings.twilio_account_sid,
+        settings.twilio_auth_token,
+        settings.twilio_caller_id,
+        settings.twilio_public_base_url,
+    )
+
+
+async def _build_telephony_status() -> TelephonyStatusOut:
     settings = get_settings()
     url_reachable, url_detail = await check_webhook_reachable(settings.twilio_public_base_url)
 
@@ -102,6 +131,38 @@ async def telephony_status() -> TelephonyStatusOut:
         public_base_url_reachable=url_reachable,
         public_base_url_detail=url_detail,
     )
+
+
+async def _get_telephony_status_cached() -> TelephonyStatusOut:
+    global _status_cache, _status_cache_expires_at, _status_cache_signature
+    now = time.monotonic()
+    signature = _status_signature()
+    if (
+        _status_cache is not None
+        and _status_cache_signature == signature
+        and now < _status_cache_expires_at
+    ):
+        return _status_cache
+
+    async with _get_status_cache_lock():
+        now = time.monotonic()
+        signature = _status_signature()
+        if (
+            _status_cache is not None
+            and _status_cache_signature == signature
+            and now < _status_cache_expires_at
+        ):
+            return _status_cache
+        status = await _build_telephony_status()
+        _status_cache = status
+        _status_cache_signature = signature
+        _status_cache_expires_at = time.monotonic() + _STATUS_CACHE_TTL_SECONDS
+        return status
+
+
+@router.get("/status", response_model=TelephonyStatusOut)
+async def telephony_status() -> TelephonyStatusOut:
+    return await _get_telephony_status_cached()
 
 
 @router.post("/test-call")

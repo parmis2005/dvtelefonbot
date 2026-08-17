@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import useSWR from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
-import type { Call, PromptVersion, TelephonyStatus, VoiceProfile } from "@/lib/types";
+import { useTelephonyStatus } from "@/lib/useTelephonyStatus";
+import useSWR from "swr";
+import type { Call, PromptVersion, VoiceProfile } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { TestCallModal } from "@/components/TestCallModal";
 
 export default function DarioPage() {
-  const { data: telephony } = useSWR<TelephonyStatus>("/api/telephony/status", fetcher);
+  const { data: telephony } = useTelephonyStatus();
   const { data: voices } = useSWR<VoiceProfile[]>("/api/voices", fetcher);
   const { data: prompts } = useSWR<PromptVersion[]>("/api/prompt-versions", fetcher);
   const { data: calls } = useSWR<Call[]>("/api/calls?active_only=true", fetcher, {

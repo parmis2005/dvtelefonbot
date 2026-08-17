@@ -22,11 +22,13 @@ from database.repository import CallRepository, DoNotCallRepository
 class FakeTwilioProvider:
     calls_made: ClassVar[list[tuple[str, str]]] = []
     verify_result: ClassVar[tuple[bool, str]] = (True, "Account-Status: active")
+    verify_calls: ClassVar[int] = 0
 
     def __init__(self, account_sid: str, auth_token: str, caller_id: str):
         pass
 
     def verify_credentials(self) -> tuple[bool, str]:
+        FakeTwilioProvider.verify_calls += 1
         return FakeTwilioProvider.verify_result
 
     def start_outbound_call(self, to_number: str, twiml_webhook_url: str) -> str:
@@ -42,6 +44,7 @@ async def _fake_webhook_reachable(base_url: str) -> tuple[bool, str]:
 def client(tmp_path, monkeypatch):
     FakeTwilioProvider.calls_made = []
     FakeTwilioProvider.verify_result = (True, "Account-Status: active")
+    FakeTwilioProvider.verify_calls = 0
 
     db_path = tmp_path / "test_telephony.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
@@ -58,6 +61,7 @@ def client(tmp_path, monkeypatch):
     # selbst zu verifizieren (siehe services/telephony_diagnostics.py).
     monkeypatch.setattr(telephony_module, "check_webhook_reachable", _fake_webhook_reachable)
     get_settings.cache_clear()
+    telephony_module.clear_telephony_status_cache()
 
     asyncio.run(reset_engine_for_tests())
 
@@ -68,6 +72,7 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
     asyncio.run(reset_engine_for_tests())
+    telephony_module.clear_telephony_status_cache()
     get_settings.cache_clear()
 
 
@@ -144,6 +149,25 @@ def test_status_reports_unreachable_webhook_url(client, monkeypatch):
     assert body["public_base_url_configured"] is True
     assert body["public_base_url_reachable"] is False
     assert "502" in body["public_base_url_detail"]
+
+
+def test_status_uses_short_lived_cache(client, monkeypatch):
+    calls = {"webhook_checks": 0}
+
+    async def fake_reachable(base_url: str) -> tuple[bool, str]:
+        calls["webhook_checks"] += 1
+        return True, "erreichbar (Test)"
+
+    monkeypatch.setattr(telephony_module, "check_webhook_reachable", fake_reachable)
+    telephony_module.clear_telephony_status_cache()
+
+    first = client.get("/api/telephony/status")
+    second = client.get("/api/telephony/status")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["webhook_checks"] == 1
+    assert FakeTwilioProvider.verify_calls == 1
 
 
 def test_trigger_test_call_blocked_when_webhook_unreachable(client, monkeypatch):

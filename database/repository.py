@@ -459,7 +459,13 @@ class AppSettingRepository:
 
     async def set_many(self, values: dict[str, str]) -> None:
         for key, value in values.items():
-            await self.set(key, value)
+            setting = await self.session.get(AppSetting, key)
+            if setting is None:
+                self.session.add(AppSetting(key=key, value=value))
+            else:
+                setting.value = value
+                setting.updated_at = datetime.utcnow()
+        await self.session.commit()
 
 
 class DashboardSessionRepository:

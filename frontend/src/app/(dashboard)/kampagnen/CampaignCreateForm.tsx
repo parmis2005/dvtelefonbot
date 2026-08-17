@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { useTelephonyStatus } from "@/lib/useTelephonyStatus";
 import { api, ApiError } from "@/lib/api";
-import type { Campaign, Lead, TelephonyStatus, VoiceProfile, PromptVersion } from "@/lib/types";
+import type { Campaign, Lead, VoiceProfile, PromptVersion } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -12,7 +13,7 @@ import { Modal } from "@/components/ui/Modal";
 
 export function CampaignCreateForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
   const { data: leads } = useSWR<Lead[]>("/api/leads", fetcher);
-  const { data: telephony } = useSWR<TelephonyStatus>("/api/telephony/status", fetcher);
+  const { data: telephony } = useTelephonyStatus();
   const { data: voices } = useSWR<VoiceProfile[]>("/api/voices", fetcher);
   const { data: prompts } = useSWR<PromptVersion[]>("/api/prompt-versions", fetcher);
 

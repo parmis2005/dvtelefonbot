@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import useSWR from "swr";
-import { fetcher } from "@/lib/swr";
-import type { TelephonyStatus } from "@/lib/types";
+import { useTelephonyStatus } from "@/lib/useTelephonyStatus";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -11,8 +9,9 @@ import { Button } from "@/components/ui/Button";
 import { TestCallModal } from "@/components/TestCallModal";
 
 export default function TelefoniePage() {
-  const { data: status, isLoading } = useSWR<TelephonyStatus>("/api/telephony/status", fetcher, {
-    refreshInterval: 20000,
+  const { data: status, isLoading } = useTelephonyStatus({
+    refreshInterval: 30000,
+    revalidateOnFocus: true,
   });
   const [testCallOpen, setTestCallOpen] = useState(false);
 

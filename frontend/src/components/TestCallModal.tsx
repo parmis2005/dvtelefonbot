@@ -3,14 +3,15 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { useTelephonyStatus } from "@/lib/useTelephonyStatus";
 import { api, ApiError } from "@/lib/api";
-import type { TelephonyStatus, VoiceProfile } from "@/lib/types";
+import type { VoiceProfile } from "@/lib/types";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 
 export function TestCallModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { data: telephony } = useSWR<TelephonyStatus>("/api/telephony/status", fetcher);
+  const { data: telephony } = useTelephonyStatus();
   const { data: voices } = useSWR<VoiceProfile[]>("/api/voices", fetcher);
   const [number, setNumber] = useState("");
   const [step, setStep] = useState<"input" | "confirm" | "done">("input");
