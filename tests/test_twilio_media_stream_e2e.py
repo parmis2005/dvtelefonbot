@@ -270,6 +270,45 @@ def short_utterance_timeout(monkeypatch):
     monkeypatch.setattr(twilio_media_handler.TwilioMediaStreamSession, "__init__", patched_init)
 
 
+@pytest.mark.asyncio
+async def test_twilio_session_uses_fast_turn_endpoint(
+    db_session, scripted_stt, fake_twilio_end_call, monkeypatch
+):
+    captured: dict[str, float] = {}
+    original_init = twilio_media_handler.TwilioMediaStreamSession.__init__
+
+    def patched_init(self, *args, **kwargs):
+        captured["silence_timeout_ms"] = kwargs["silence_timeout_ms"]
+        captured["max_utterance_seconds"] = kwargs["max_utterance_seconds"]
+        kwargs["max_utterance_seconds"] = TEST_MAX_UTTERANCE_SECONDS
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(twilio_media_handler.TwilioMediaStreamSession, "__init__", patched_init)
+    monkeypatch.setattr(
+        ChatterboxTTSProvider,
+        "synthesize",
+        lambda self, text, output_path: _async_return(_write_minimal_wav(output_path)),
+    )
+    monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+
+    _lead_id, call_id = await _seed_call(db_session)
+    scripted_stt(["Ja, kein Problem.", "Vielen Dank, auf Wiederhoeren."])
+
+    ws = FakeTwilioWebSocket()
+    feeder = asyncio.create_task(
+        _feed_conversation(ws, "MZfastturn", "CAfastturn", call_id, total_seconds=1.2)
+    )
+    await twilio_api.twilio_media_stream(ws)
+    feeder.cancel()
+    try:
+        await feeder
+    except asyncio.CancelledError:
+        pass
+
+    assert captured["silence_timeout_ms"] == 900
+    assert captured["max_utterance_seconds"] <= 5.0
+
+
 async def _seed_call(db_session) -> tuple[int, int]:
     lead = await LeadRepository(db_session).create(
         unternehmen="Beauty Studio Beispiel",
@@ -608,6 +647,10 @@ async def test_technical_error_during_call_does_not_crash_server(
 
 async def _true() -> bool:
     return True
+
+
+async def _async_return(value):
+    return value
 
 
 @pytest.mark.asyncio

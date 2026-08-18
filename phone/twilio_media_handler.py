@@ -99,6 +99,7 @@ class TwilioMediaStreamSession:
         # (nur waehrend der Zuhoer-Phase).
         self._current_utterance: list[np.ndarray] = []
         self._utterance_ready = asyncio.Event()
+        self._last_listen_end_reason = "unknown"
         self._receiver_task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
@@ -213,6 +214,7 @@ class TwilioMediaStreamSession:
                     if self._listening:
                         self._current_utterance.append(pcm_8k)
                         if endpoint_hit:
+                            self._last_listen_end_reason = "endpoint"
                             self._utterance_ready.set()
                 elif event == "stop":
                     self.dario.call_active = False
@@ -393,7 +395,14 @@ class TwilioMediaStreamSession:
         self._current_utterance = []
         self._endpoint.reset()
         self._utterance_ready.clear()
+        self._last_listen_end_reason = "timeout"
         self._listening = True
+        logger.info(
+            "[LISTEN] started call_id=%s streamSid=%s max_seconds=%.1f",
+            self.call_id,
+            self.stream_sid,
+            self.max_utterance_seconds,
+        )
         try:
             try:
                 await asyncio.wait_for(
@@ -405,16 +414,43 @@ class TwilioMediaStreamSession:
             self._listening = False
 
         if self._stopped.is_set() or not self._current_utterance:
+            logger.info(
+                "[LISTEN] finished call_id=%s streamSid=%s reason=%s frames=%s text=none",
+                self.call_id,
+                self.stream_sid,
+                "stopped" if self._stopped.is_set() else self._last_listen_end_reason,
+                len(self._current_utterance),
+            )
             return ""
 
         full_pcm_8k = np.concatenate(self._current_utterance)
         pcm_16k = resample_pcm16(full_pcm_8k, TWILIO_SAMPLE_RATE, STT_SAMPLE_RATE)
+        duration_seconds = len(full_pcm_8k) / TWILIO_SAMPLE_RATE
+        logger.info(
+            "[LISTEN] finished call_id=%s streamSid=%s reason=%s frames=%s duration=%.2fs",
+            self.call_id,
+            self.stream_sid,
+            self._last_listen_end_reason,
+            len(self._current_utterance),
+            duration_seconds,
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             wav_path = tmp.name
         try:
             write_wav(wav_path, pcm_16k.tobytes(), sample_rate=STT_SAMPLE_RATE)
+            logger.info(
+                "[STT] transcription started call_id=%s audio_seconds=%.2f",
+                self.call_id,
+                duration_seconds,
+            )
             result = await self.stt.transcribe(wav_path)
+            logger.info(
+                "[STT] transcription finished call_id=%s chars=%s text=%r",
+                self.call_id,
+                len(result.text),
+                result.text[:160],
+            )
             return result.text
         finally:
             Path(wav_path).unlink(missing_ok=True)

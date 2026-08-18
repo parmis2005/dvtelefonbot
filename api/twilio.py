@@ -262,8 +262,12 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             twilio_provider=twilio_provider,
             stream_sid=stream_sid,
             twilio_call_sid=twilio_call_sid,
-            silence_timeout_ms=int(settings.silence_timeout * 1000),
-            max_utterance_seconds=float(settings.silence_timeout),
+            # Turn-Ende nach Kundensprache: kurz halten, sonst wartet Dario
+            # nach einer Antwort mehrere Sekunden und wirkt stumm. Das
+            # Dashboard-Setting `silence_timeout` steuert stattdessen nur das
+            # maximale Fenster fuer "gar keine verwertbare Antwort".
+            silence_timeout_ms=900,
+            max_utterance_seconds=max(3.0, min(float(settings.silence_timeout), 5.0)),
             wait_timeout_seconds=settings.wait_timeout,
             greeting_audio_path=str(greeting_audio.path),
         )
