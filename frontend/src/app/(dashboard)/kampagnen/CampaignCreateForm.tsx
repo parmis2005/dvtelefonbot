@@ -156,6 +156,10 @@ export function CampaignCreateForm({ onCreated }: { onCreated: (c: Campaign) => 
             Jetzt anrufen ({selected.size})
           </Button>
         </div>
+        <p className="mt-2 text-right text-xs text-dv-text-muted">
+          Dario ruft alle ausgewählten Kontakte automatisch an. Transkript,
+          Zusammenfassung und Ergebnis landen danach in der Anrufhistorie.
+        </p>
       </CardContent>
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Kampagne starten?">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { api, ApiError } from "@/lib/api";
@@ -92,7 +93,13 @@ export function CampaignCard({ campaignId }: { campaignId: number }) {
 
         {error && <p className="mb-2 text-sm text-dv-danger">{error}</p>}
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/anrufhistorie?campaign_id=${campaign.id}`}
+            className="inline-flex h-8 items-center justify-center rounded-dv-sm border border-dv-border bg-dv-surface px-3 text-sm font-medium text-dv-text-primary transition-colors duration-150 hover:bg-dv-surface-hover"
+          >
+            Dokumentation ansehen
+          </Link>
           {campaign.status === "RUNNING" && (
             <>
               <Button size="sm" variant="secondary" onClick={() => action("pause")} disabled={busy}>

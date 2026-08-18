@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
-import type { Call, CallResultValue, Lead } from "@/lib/types";
+import type { Call, CallResultValue, Campaign, Lead } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -37,9 +37,33 @@ function formatDuration(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function readCampaignIdFromLocation(): number | null {
+  if (typeof window === "undefined") return null;
+  const rawCampaignId = new URLSearchParams(window.location.search).get("campaign_id");
+  if (!rawCampaignId) return null;
+  const parsed = Number(rawCampaignId);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function subscribeToLocationChanges(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
 export default function AnrufhistoriePage() {
-  const { data: calls } = useSWR<Call[]>("/api/calls", fetcher, { refreshInterval: 15000 });
+  const campaignId = useSyncExternalStore(
+    subscribeToLocationChanges,
+    readCampaignIdFromLocation,
+    () => null
+  );
+  const callsPath = campaignId ? `/api/calls?campaign_id=${campaignId}` : "/api/calls";
+  const { data: calls } = useSWR<Call[]>(callsPath, fetcher, { refreshInterval: 15000 });
   const { data: leads } = useSWR<Lead[]>("/api/leads", fetcher);
+  const { data: campaign } = useSWR<Campaign>(
+    campaignId ? `/api/campaigns/${campaignId}` : null,
+    fetcher
+  );
   const [filter, setFilter] = useState<CallResultValue | "ALLE">("ALLE");
 
   const leadMap = useMemo(() => {
@@ -58,7 +82,29 @@ export default function AnrufhistoriePage() {
 
   return (
     <div>
-      <PageHeader title="Anrufhistorie" subtitle={`${calls?.length ?? 0} Anrufe insgesamt`} />
+      <PageHeader
+        title="Anrufhistorie"
+        subtitle={
+          campaignId
+            ? `${calls?.length ?? 0} Anrufe aus ${campaign?.name ?? `Kampagne #${campaignId}`}`
+            : `${calls?.length ?? 0} Anrufe insgesamt`
+        }
+      />
+
+      {campaignId && (
+        <div className="mb-4 rounded-dv-md border border-dv-border-subtle bg-dv-surface px-4 py-3 text-sm text-dv-text-secondary">
+          <div className="font-medium text-dv-text-primary">
+            Dokumentation für {campaign?.name ?? `Kampagne #${campaignId}`}
+          </div>
+          <div className="mt-1">
+            Hier siehst du nur die Gespräche dieses Sammelanrufs. Jedes Detail enthält Transkript,
+            Zusammenfassung, Ergebnis und technische Twilio-Daten.
+          </div>
+          <Link href="/anrufhistorie" className="mt-2 inline-block text-dv-accent hover:underline">
+            Alle Anrufe anzeigen
+          </Link>
+        </div>
+      )}
 
       <div className="mb-4">
         <Select
