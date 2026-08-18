@@ -24,6 +24,7 @@ from database.repository import CallRepository, LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
 from services.greeting_audio import prepare_greeting_audio
+from services.response_audio import prepare_initial_response_audio
 from services.telephony_diagnostics import check_webhook_reachable
 
 router = APIRouter(prefix="/api/telephony", tags=["telephony"], dependencies=[Depends(require_auth)])
@@ -226,11 +227,12 @@ async def trigger_test_call(payload: TestCallRequest, session: DbSession) -> dic
     status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
     try:
         await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
+        await prepare_initial_response_audio(session, lead_id=lead.id, call_id=call.id)
     except Exception as exc:
         await call_service.mark_failed(call.id)
         raise HTTPException(
             status_code=502,
-            detail=f"Begruessungs-Audio konnte nicht vorbereitet werden: {exc}",
+            detail=f"Audio konnte nicht vorbereitet werden: {exc}",
         ) from exc
 
     try:

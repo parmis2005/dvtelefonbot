@@ -30,6 +30,7 @@ from database.repository import CallRepository, LeadRepository
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
 from services.greeting_audio import prepare_greeting_audio
+from services.response_audio import prepare_initial_response_audio
 from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
@@ -149,6 +150,14 @@ async def run(args: argparse.Namespace) -> int:
                 print("Beim ersten Chatterbox-Lauf kann das dauern. Danach startet der echte Anruf schneller.")
                 greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=None)
                 print(f"  OK ({greeting.bytes} Bytes)")
+                print("Bereite wahrscheinliche erste Antwort-Audios vor ...")
+                prepared_responses = await prepare_initial_response_audio(
+                    session, lead_id=lead.id, call_id=None
+                )
+                total_response_bytes = sum(item.bytes for item in prepared_responses)
+                print(
+                    f"  OK ({len(prepared_responses)} Antwort(en), {total_response_bytes} Bytes)"
+                )
                 print("Vorbereitung abgeschlossen. Noch wurde kein Twilio-Anruf ausgeloest.")
                 return 0
             except Exception as exc:
@@ -183,6 +192,10 @@ async def run(args: argparse.Namespace) -> int:
                 print("Bitte warten und nicht Ctrl+C druecken; das Telefon klingelt erst nach diesem Schritt.")
                 greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
                 print(f"  OK ({greeting.bytes} Bytes)")
+                prepared_responses = await prepare_initial_response_audio(
+                    session, lead_id=lead.id, call_id=call.id
+                )
+                print(f"  Erste Antwort vorbereitet ({len(prepared_responses)} Variante(n)).")
             except Exception as exc:
                 print(f"\nFEHLER beim Vorbereiten der Begruessung: {exc}")
                 await call_service.mark_failed(call.id)

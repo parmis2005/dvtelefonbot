@@ -42,6 +42,19 @@ def _cache_path(tts: TextToSpeechProvider, text: str, label: str) -> Path:
     return CACHE_DIR / f"{label}_{digest}.wav"
 
 
+def get_cached_tts(
+    tts: TextToSpeechProvider,
+    text: str,
+    *,
+    label: str = "tts",
+) -> CachedTTS | None:
+    """Return a prepared WAV without generating anything in the live path."""
+    path = _cache_path(tts, text, label)
+    if path.exists() and path.stat().st_size > 44:
+        return CachedTTS(path=path, bytes=path.stat().st_size)
+    return None
+
+
 async def ensure_cached_tts(
     tts: TextToSpeechProvider,
     text: str,

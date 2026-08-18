@@ -150,8 +150,12 @@ def slow_tts(monkeypatch):
     async def fake_is_available(self) -> bool:
         return True
 
+    async def fake_warmup(self) -> None:
+        return None
+
     monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", fake_synthesize)
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", fake_is_available)
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", fake_warmup)
 
 
 async def _feed_with_mid_speech_interruption(

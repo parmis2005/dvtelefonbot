@@ -236,8 +236,12 @@ def fast_tts(monkeypatch, tmp_path):
     async def fake_is_available(self) -> bool:
         return True
 
+    async def fake_warmup(self) -> None:
+        return None
+
     monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", fake_synthesize)
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", fake_is_available)
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", fake_warmup)
 
 
 @pytest.fixture
@@ -290,6 +294,7 @@ async def test_twilio_session_uses_fast_turn_endpoint(
         lambda self, text, output_path: _async_return(_write_minimal_wav(output_path)),
     )
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", lambda self: _async_return(None))
 
     _lead_id, call_id = await _seed_call(db_session)
     scripted_stt(["Ja, kein Problem.", "Vielen Dank, auf Wiederhoeren."])
@@ -411,6 +416,7 @@ async def test_customer_audio_during_tts_generation_does_not_cancel_greeting(
 
     monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", delayed_synthesize)
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", lambda self: _async_return(None))
     monkeypatch.setattr(
         twilio_media_handler.VoiceActivityDetector,
         "is_speech",
@@ -458,6 +464,7 @@ async def test_customer_audio_during_greeting_playback_does_not_barge_in(
 
     monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", long_synthesize)
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", lambda self: _async_return(None))
     monkeypatch.setattr(
         twilio_media_handler.VoiceActivityDetector,
         "is_speech",
@@ -619,6 +626,7 @@ async def test_technical_error_during_call_does_not_crash_server(
 
     monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", failing_synthesize)
     monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(ChatterboxTTSProvider, "warmup", lambda self: _async_return(None))
 
     _lead_id, call_id = await _seed_call(db_session)
     scripted_stt(["Ja, kein Problem."])

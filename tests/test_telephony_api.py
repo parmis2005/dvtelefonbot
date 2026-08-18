@@ -66,7 +66,13 @@ def client(tmp_path, monkeypatch):
         path.write_bytes(b"RIFF" + (b"\x00" * 80))
         return PreparedGreeting(text="Hallo", path=path, bytes=path.stat().st_size)
 
+    async def fake_prepare_initial_response_audio(session, *, lead_id: int, call_id: int | None = None) -> list:
+        return []
+
     monkeypatch.setattr(telephony_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
+    monkeypatch.setattr(
+        telephony_module, "prepare_initial_response_audio", fake_prepare_initial_response_audio
+    )
     # Default: Tunnel gilt als erreichbar (die echte Pruefung wuerde gegen
     # die Fake-URL oben sonst 5s in einen DNS-Fehler laufen) - dedizierte
     # Tests unten ueberschreiben dies gezielt, um die neue Sicherheitspruefung

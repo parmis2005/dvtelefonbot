@@ -59,7 +59,13 @@ async def _campaign_test_env(db_session, monkeypatch, tmp_path):
     async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
         return PreparedGreeting(text="Hallo", path=tmp_path / "greeting.wav", bytes=84)
 
+    async def fake_prepare_initial_response_audio(session, *, lead_id: int, call_id: int | None = None) -> list:
+        return []
+
     monkeypatch.setattr(campaign_service_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
+    monkeypatch.setattr(
+        campaign_service_module, "prepare_initial_response_audio", fake_prepare_initial_response_audio
+    )
     # Der echte Erreichbarkeits-Check (services/telephony_diagnostics.py)
     # wuerde gegen die Fake-URL unten ins Leere laufen (DNS-Fehler, 5s
     # Timeout) - hier wie ein erreichbarer Tunnel simuliert, da genau diese

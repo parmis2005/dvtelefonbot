@@ -32,6 +32,7 @@ from agent.dario import Dario
 from core.logging import get_logger
 from phone.twilio_voice import TwilioProvider
 from services.call_service import CallService
+from services.tts_cache import get_cached_tts
 from voice.audio_stream import write_wav
 from voice.codecs import mulaw_to_pcm16, pcm16_to_mulaw, resample_pcm16
 from voice.stt.base import SpeechToTextProvider
@@ -101,6 +102,7 @@ class TwilioMediaStreamSession:
         self._utterance_ready = asyncio.Event()
         self._last_listen_end_reason = "unknown"
         self._receiver_task: asyncio.Task | None = None
+        self._tts_warmup_task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
     # --- Hauptschleife -------------------------------------------------
@@ -113,6 +115,7 @@ class TwilioMediaStreamSession:
                 await self.call_service.mark_answered(self.call_id)
 
             self._receiver_task = asyncio.create_task(self._receive_loop())
+            self._tts_warmup_task = asyncio.create_task(self._warm_tts_provider())
 
             opening = self.dario.opening_line()
             logger.info(
@@ -177,7 +180,29 @@ class TwilioMediaStreamSession:
                     pass
                 except Exception:
                     logger.exception("Fehler beim Beenden des Empfangs-Tasks (Call %s)", self.call_id)
+            if self._tts_warmup_task is not None:
+                if not self._tts_warmup_task.done():
+                    self._tts_warmup_task.cancel()
+                try:
+                    await self._tts_warmup_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Fehler beim Beenden des TTS-Warmups (Call %s)", self.call_id)
             await self._on_session_end()
+
+    async def _warm_tts_provider(self) -> None:
+        warmup = getattr(self.tts, "warmup", None)
+        if not callable(warmup):
+            return
+        try:
+            logger.info("[TTS] warmup started call_id=%s provider=%s", self.call_id, type(self.tts).__name__)
+            await warmup()
+            logger.info("[TTS] warmup finished call_id=%s provider=%s", self.call_id, type(self.tts).__name__)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[TTS] warmup failed call_id=%s provider=%s", self.call_id, type(self.tts).__name__)
 
     async def _wait_for_start(self) -> None:
         while True:
@@ -283,6 +308,22 @@ class TwilioMediaStreamSession:
                 label,
             )
             await self._stream_wav_file(wav_path, allow_barge_in=allow_barge_in)
+            return
+
+        cached = get_cached_tts(self.tts, text, label=label)
+        if cached is not None:
+            logger.info(
+                "[TTS] generation started call_id=%s label=%s source=cache",
+                self.call_id,
+                label,
+            )
+            logger.info(
+                "[TTS] generation finished bytes=%s call_id=%s label=%s source=cache",
+                cached.bytes,
+                self.call_id,
+                label,
+            )
+            await self._stream_wav_file(str(cached.path), allow_barge_in=allow_barge_in)
             return
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

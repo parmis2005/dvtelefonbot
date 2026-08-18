@@ -59,7 +59,13 @@ def client(tmp_path, monkeypatch):
     async def fake_prepare_greeting_audio(session, *, lead_id: int, call_id: int) -> PreparedGreeting:
         return PreparedGreeting(text="Hallo", path=tmp_path / "greeting.wav", bytes=84)
 
+    async def fake_prepare_initial_response_audio(session, *, lead_id: int, call_id: int | None = None) -> list:
+        return []
+
     monkeypatch.setattr(campaign_service_module, "prepare_greeting_audio", fake_prepare_greeting_audio)
+    monkeypatch.setattr(
+        campaign_service_module, "prepare_initial_response_audio", fake_prepare_initial_response_audio
+    )
     # Simuliert einen erreichbaren Tunnel - siehe tests/test_campaign_manager.py
     # fuer den Hintergrund (services/telephony_diagnostics.py).
     monkeypatch.setattr(

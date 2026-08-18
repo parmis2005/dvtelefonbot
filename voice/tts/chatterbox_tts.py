@@ -95,6 +95,10 @@ class ChatterboxTTSProvider(TextToSpeechProvider):
                 return False
         return True
 
+    async def warmup(self) -> None:
+        """Load the heavy Chatterbox model before the first live response."""
+        await self._get_model()
+
     async def _get_model(self):
         if self._model is not None:
             return self._model

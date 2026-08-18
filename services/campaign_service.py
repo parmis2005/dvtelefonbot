@@ -30,6 +30,7 @@ from database.repository import CallRepository, CampaignRepository, LeadReposito
 from phone.twilio_voice import TwilioConfigError, TwilioProvider
 from services.call_service import CallService
 from services.greeting_audio import prepare_greeting_audio
+from services.response_audio import prepare_initial_response_audio
 from services.telephony_diagnostics import check_webhook_reachable
 
 logger = get_logger(__name__)
@@ -252,9 +253,10 @@ class CampaignManager:
         status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
         try:
             await prepare_greeting_audio(session, lead_id=lead_id, call_id=call.id)
+            await prepare_initial_response_audio(session, lead_id=lead_id, call_id=call.id)
         except Exception as exc:
             logger.error(
-                "Kampagne %s: Begruessungs-Audio fuer Lead %s fehlgeschlagen: %s",
+                "Kampagne %s: Audio-Vorbereitung fuer Lead %s fehlgeschlagen: %s",
                 campaign_id,
                 lead_id,
                 exc,
