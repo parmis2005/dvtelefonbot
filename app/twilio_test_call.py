@@ -149,6 +149,7 @@ async def run(args: argparse.Namespace) -> int:
             answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
             if answer != "ja":
                 print("Abgebrochen - kein Anruf ausgeloest.")
+                print("Wenn dein Terminal den Prompt abbricht: npm run dev -- --yes")
                 return 0
 
         call = await call_service.start_call(lead.id, ignore_cooldown=True)
@@ -175,8 +176,10 @@ async def run(args: argparse.Namespace) -> int:
 
         await CallRepository(session).update(call.id, twilio_call_sid=call_sid)
         print(f"\nAnruf ausgeloest. Twilio Call-SID: {call_sid}")
+        print("[CALL_TRIGGERED]")
         print(f"Dario-Call-ID (Dashboard/DB): {call.id}")
         print("Sobald abgenommen wird, verbindet Twilio den Anruf mit Darios Media-Stream-WebSocket.")
+        return 2
 
     return 0
 

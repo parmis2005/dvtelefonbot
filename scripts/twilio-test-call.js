@@ -325,29 +325,16 @@ async function startBackend(publicUrl) {
 
 function runTestCall(publicUrl) {
   return new Promise((resolve) => {
-    let callTriggered = false;
-    let outputTail = "";
     const child = spawn(pythonBin, ["-m", "app.twilio_test_call", ...argsFromCli], {
       cwd: ROOT,
       env: { ...process.env, TWILIO_PUBLIC_BASE_URL: publicUrl },
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: "inherit",
     });
 
-    function forwardAndTrack(stream, target) {
-      stream.on("data", (chunk) => {
-        const text = chunk.toString();
-        outputTail = (outputTail + text).slice(-500);
-        if (outputTail.includes("Anruf ausgeloest.")) {
-          callTriggered = true;
-        }
-        target.write(text);
-      });
-    }
-
-    forwardAndTrack(child.stdout, process.stdout);
-    forwardAndTrack(child.stderr, process.stderr);
-
-    child.on("exit", (code, signal) => resolve({ code: code ?? 1, signal, callTriggered }));
+    child.on("exit", (code, signal) => {
+      const exitCode = code ?? 1;
+      resolve({ code: exitCode === 2 ? 0 : exitCode, signal, callTriggered: exitCode === 2 });
+    });
     child.on("error", (err) => {
       logErr(`Testanruf-Prozess konnte nicht gestartet werden: ${err.message}`);
       resolve({ code: 1, signal: null, callTriggered: false });
@@ -373,9 +360,11 @@ async function main() {
 
   logOk(`Aktuelle oeffentliche URL fuer diesen Lauf: ${ngrok.publicUrl}`);
   logCall(
-    argsFromCli.includes("--yes")
-      ? "Starte explizit bestaetigten Testanruf ..."
-      : "Starte bestaetigungspflichtigen Testanruf-Prompt ..."
+    argsFromCli.includes("--no-call")
+      ? "Starte Checks ohne Anruf ..."
+      : argsFromCli.includes("--yes")
+        ? "Starte explizit bestaetigten Testanruf ..."
+        : "Starte bestaetigungspflichtigen Testanruf-Prompt ..."
   );
   const result = await runTestCall(ngrok.publicUrl);
 
