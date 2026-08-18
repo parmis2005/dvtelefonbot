@@ -18,6 +18,7 @@ const fs = require("fs");
 const http = require("http");
 const net = require("net");
 const path = require("path");
+const readline = require("readline");
 const { spawn } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -325,7 +326,8 @@ async function startBackend(publicUrl) {
 
 function runTestCall(publicUrl) {
   return new Promise((resolve) => {
-    const child = spawn(pythonBin, ["-m", "app.twilio_test_call", ...argsFromCli], {
+    const childArgs = ["-m", "app.twilio_test_call", ...argsFromCli];
+    const child = spawn(pythonBin, childArgs, {
       cwd: ROOT,
       env: { ...process.env, TWILIO_PUBLIC_BASE_URL: publicUrl },
       stdio: "inherit",
@@ -342,6 +344,40 @@ function runTestCall(publicUrl) {
   });
 }
 
+function needsNodeConfirmation() {
+  return !argsFromCli.includes("--yes") && !argsFromCli.includes("--no-call");
+}
+
+function addYesFlagForChild() {
+  if (!argsFromCli.includes("--yes")) {
+    argsFromCli.push("--yes");
+  }
+}
+
+function askForConfirmation() {
+  if (!process.stdin.isTTY) {
+    logErr("Keine interaktive Eingabe verfuegbar. Kein Anruf ausgeloest.");
+    logErr("Wenn du bewusst ohne Prompt starten willst: npm run dev -- --yes");
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true,
+    });
+
+    rl.question(
+      "\nDieser Anruf ist ECHT und KOSTENPFLICHTIG. Jetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ",
+      (answer) => {
+        rl.close();
+        resolve(String(answer || "").trim().toLowerCase() === "ja");
+      }
+    );
+  });
+}
+
 async function main() {
   ensurePython();
   if (isHelpOnly()) {
@@ -351,6 +387,15 @@ async function main() {
 
   if (argsFromCli.includes("--yes")) {
     logWarn("--yes erkannt: der Testanruf wird nach erfolgreichen Checks ohne Terminal-Prompt ausgeloest.");
+  }
+
+  if (needsNodeConfirmation()) {
+    const confirmed = await askForConfirmation();
+    if (!confirmed) {
+      logCall("Abgebrochen - kein Anruf ausgeloest.");
+      return;
+    }
+    addYesFlagForChild();
   }
 
   logCall("Bereite echten Twilio-Testanruf vor ...");
