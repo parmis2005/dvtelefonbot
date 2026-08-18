@@ -27,8 +27,8 @@ from core.config import get_settings
 from database.database import get_session_factory
 from database.models import CallResult, CallStatus, CampaignStatus
 from database.repository import CallRepository, CampaignRepository, LeadRepository
-from services.greeting_audio import PreparedGreeting
 from services.campaign_service import CampaignManager
+from services.greeting_audio import PreparedGreeting
 
 
 class FakeTwilioProvider:

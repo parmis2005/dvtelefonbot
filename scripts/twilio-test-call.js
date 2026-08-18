@@ -22,9 +22,12 @@ const readline = require("readline");
 const { execFileSync, spawn } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
+const FRONTEND_DIR = path.join(ROOT, "frontend");
 const BACKEND_PORT = 8000;
+const FRONTEND_PORT = 3000;
 const NGROK_API_URL = "http://127.0.0.1:4040/api/tunnels";
 const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/api/health`;
+const DASHBOARD_URL = `http://127.0.0.1:${FRONTEND_PORT}`;
 const argsFromCli = process.argv.slice(2);
 
 const COLOR = {
@@ -434,6 +437,49 @@ async function startBackend(publicUrl) {
   return { started: true };
 }
 
+async function startFrontend() {
+  if (await isPortInUse(FRONTEND_PORT)) {
+    logOk(`Dashboard laeuft bereits (${DASHBOARD_URL}).`);
+    return { started: false };
+  }
+
+  if (!fs.existsSync(path.join(FRONTEND_DIR, "node_modules"))) {
+    logErr("frontend/node_modules nicht gefunden.");
+    logErr('Bitte einmalig "npm install" im Ordner "frontend" ausfuehren.');
+    await shutdown(1);
+    return null;
+  }
+
+  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  logCall(`Starte Dashboard auf Port ${FRONTEND_PORT} ...`);
+  const child = spawn(npmCmd, ["run", "dev", "--", "-p", String(FRONTEND_PORT)], {
+    cwd: FRONTEND_DIR,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  spawnedChildren.push({ name: "dashboard", child });
+  pipeWithPrefix(child.stdout, "dashboard", COLOR.dim);
+  pipeWithPrefix(child.stderr, "dashboard", COLOR.dim);
+
+  child.once("exit", (code, signal) => {
+    if (!shuttingDown) {
+      logErr(`Dashboard wurde beendet (code=${code}, signal=${signal}).`);
+    }
+  });
+
+  const ready = await waitFor("Dashboard", 60000, 1000, async () => {
+    const response = await httpGet(DASHBOARD_URL);
+    return response.ok ? response : null;
+  });
+  if (!ready) {
+    logWarn(`Dashboard antwortet noch nicht unter ${DASHBOARD_URL}, laeuft aber weiter.`);
+    return { started: true };
+  }
+
+  logOk(`Dashboard bereit: ${DASHBOARD_URL}`);
+  return { started: true };
+}
+
 function runTestCall(publicUrl, callArgs = argsFromCli) {
   return new Promise((resolve) => {
     const childArgs = ["-u", "-m", "app.twilio_test_call", ...callArgs];
@@ -518,6 +564,7 @@ async function main() {
   const ngrok = await startNgrok();
   if (!ngrok) return;
   await startBackend(ngrok.publicUrl);
+  await startFrontend();
 
   logOk(`Aktuelle oeffentliche URL fuer diesen Lauf: ${ngrok.publicUrl}`);
   if (argsFromCli.includes("--no-call") || argsFromCli.includes("--prepare-only")) {

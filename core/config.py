@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     twilio_test_number: str = ""
     twilio_public_base_url: str = ""
     twilio_validate_signature: bool = True
+    twilio_audio_debug_enabled: bool = True
+    twilio_audio_debug_dir: str = "./data/audio_debug"
 
     # SMTP
     smtp_host: str = ""

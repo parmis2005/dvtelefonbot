@@ -42,7 +42,13 @@ async def prepare_initial_response_audio(
 
     prepared: list[PreparedResponseAudio] = []
     seen_texts: set[str] = set()
-    for sample_reply in ("Ja, habe ich.", "Ja, ich habe kurz Zeit.", "Ja, kein Problem."):
+    for sample_reply in (
+        "Ja, habe ich.",
+        "Ja, ich habe kurz Zeit.",
+        "Ja, kein Problem.",
+        "Ja, worum geht es?",
+        "Worum geht es?",
+    ):
         dario = await Dario.for_lead(
             session,
             settings,

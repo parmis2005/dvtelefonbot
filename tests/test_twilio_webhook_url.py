@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from starlette.datastructures import Headers, URL
+from starlette.datastructures import URL, Headers
 
 from api.twilio import _websocket_url_from_request
 

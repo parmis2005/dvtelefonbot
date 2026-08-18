@@ -155,11 +155,13 @@ class ChatterboxTTSProvider(TextToSpeechProvider):
         word_count = max(1, len(text.split()))
         # grobzuegiger, aber wirksamer Korridor gegen abgeschnittene/
         # halluzinierte Ausreisser (siehe Feinabstimmung: normale Werte lagen
-        # bei ca. 0.4-0.6s/Wort fuer ruhige Sprache)
+        # bei ca. 0.4-0.6s/Wort fuer ruhige Sprache). Fuer Telefonie ist
+        # die untere Grenze bewusst etwas hoeher, weil zu schnelle Seeds bei
+        # 8kHz/mu-law deutlich hektischer und schlechter verstaendlich wirken.
         # Unterhalb davon klingt die Ausgabe im Telefonpfad hoerbar gehetzt.
         # Chatterbox ist nicht deterministisch; zu schnelle Seeds werden neu
         # versucht, bis ein ruhigeres Timing entsteht.
-        min_dur = word_count * 0.42
+        min_dur = word_count * 0.48
         max_dur = word_count * 1.1 + 1.5
         return min_dur <= duration <= max_dur
 

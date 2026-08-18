@@ -15,6 +15,7 @@ Produktionscode fuer Resampling/Kodierung/Chunking/Versand.
 from __future__ import annotations
 
 import base64
+import time
 
 import numpy as np
 import pytest
@@ -188,6 +189,50 @@ async def test_stream_wav_file_produces_valid_twilio_media_messages(tmp_path):
     err_power = np.mean(err**2)
     snr_db = 10 * np.log10(signal_power / err_power)
     assert snr_db > 30, f"Unerwartet niedriger SNR im Versandpfad: {snr_db:.1f} dB"
+
+
+@pytest.mark.asyncio
+async def test_stream_wav_file_writes_decoded_twilio_audio_debug_wav(tmp_path):
+    src_rate = 24000
+    duration = 0.2
+    t = np.arange(int(src_rate * duration)) / src_rate
+    tone_float = (0.5 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)
+
+    wav_path = str(tmp_path / "synthetic_tts_output.wav")
+    sf.write(wav_path, tone_float, src_rate, subtype="FLOAT")
+
+    ws = FakeTwilioWebSocket()
+    session = _make_session(ws, "MZdebugaudio123456")
+    session.audio_debug_dir = tmp_path / "audio_debug"
+
+    await session._stream_wav_file(wav_path, label="tts")
+
+    debug_files = list(session.audio_debug_dir.glob("call_1_*_tts_twilio_decoded.wav"))
+    assert len(debug_files) == 1
+    info = sf.info(str(debug_files[0]))
+    assert info.samplerate == TWILIO_SAMPLE_RATE
+    assert info.channels == 1
+    assert info.duration > 0
+
+
+def test_barge_in_requires_relevant_speech_not_only_vad(monkeypatch):
+    ws = FakeTwilioWebSocket()
+    session = _make_session(ws, "MZbargethreshold")
+    session._speaking = True
+    session._barge_in_enabled = True
+    session._playback_started_at = time.perf_counter() - 1.0
+
+    monkeypatch.setattr(session._vad, "is_speech", lambda frame, sample_rate=16000: True)
+
+    quiet = np.zeros(FRAME_SAMPLES_8K, dtype=np.int16)
+    for _ in range(8):
+        session._process_vad_frames(quiet)
+    assert not session._barge_in_event.is_set()
+
+    loud = np.full(FRAME_SAMPLES_8K, 12000, dtype=np.int16)
+    for _ in range(8):
+        session._process_vad_frames(loud)
+    assert session._barge_in_event.is_set()
 
 
 @pytest.mark.asyncio

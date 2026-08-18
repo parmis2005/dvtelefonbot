@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import enum
 import json
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +50,18 @@ FRAME_SAMPLES_8K = TWILIO_SAMPLE_RATE * FRAME_MS // 1000  # 160 Samples = 160 By
 VAD_FRAME_MS = 30  # webrtcvad erlaubt nur 10/20/30ms
 
 
+class MediaSessionState(str, enum.Enum):
+    INITIALIZING = "INITIALIZING"
+    CONNECTED = "CONNECTED"
+    SPEAKING = "SPEAKING"
+    LISTENING = "LISTENING"
+    THINKING = "THINKING"
+    WAITING = "WAITING"
+    ENDING = "ENDING"
+    ENDED = "ENDED"
+    ERROR = "ERROR"
+
+
 class TwilioMediaStreamSession:
     def __init__(
         self,
@@ -64,6 +78,8 @@ class TwilioMediaStreamSession:
         max_utterance_seconds: float = 20.0,
         wait_timeout_seconds: int = 25,
         greeting_audio_path: str | None = None,
+        opening_text: str | None = None,
+        audio_debug_dir: str | None = None,
     ):
         self.ws = websocket
         self.dario = dario
@@ -78,6 +94,8 @@ class TwilioMediaStreamSession:
         # hat (ConversationContext.wait_mode) - siehe Dario.check_wait_timeout.
         self.wait_timeout_seconds = wait_timeout_seconds
         self.greeting_audio_path = greeting_audio_path
+        self.opening_text = opening_text
+        self.audio_debug_dir = Path(audio_debug_dir) if audio_debug_dir else None
 
         # Werden ueblicherweise vom Aufrufer schon aus dem "start"-Event
         # herausgelesen uebergeben (siehe api/twilio.py), da dort auch die
@@ -94,6 +112,13 @@ class TwilioMediaStreamSession:
         self._barge_in_enabled = False
         self._listening = False
         self._barge_in_event = asyncio.Event()
+        self._state = MediaSessionState.INITIALIZING
+        self._playback_started_at: float | None = None
+        self._barge_in_speech_ms = 0
+        self._last_speech_active = False
+        self._speech_started_at: float | None = None
+        self._speech_ended_at: float | None = None
+        self._last_stt_finished_at: float | None = None
 
         # Vom durchgehenden Empfangs-Task befuellt, von _listen_for_utterance
         # konsumiert - entkoppelt Lesen (immer aktiv) von Verarbeiten
@@ -105,6 +130,33 @@ class TwilioMediaStreamSession:
         self._tts_warmup_task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
+    def _set_state(self, state: MediaSessionState) -> None:
+        if self._state == state:
+            return
+        previous = self._state
+        self._state = state
+        logger.info(
+            "[STATE] %s -> %s call_id=%s streamSid=%s callSid=%s",
+            previous.value,
+            state.value,
+            self.call_id,
+            self.stream_sid,
+            self.call_sid,
+        )
+
+    def _log_latency(
+        self, metric: str, started_at: float | None, ended_at: float | None = None
+    ) -> None:
+        if started_at is None:
+            return
+        end = ended_at if ended_at is not None else time.perf_counter()
+        logger.info(
+            "[LATENCY] %s=%.0fms call_id=%s",
+            metric,
+            (end - started_at) * 1000,
+            self.call_id,
+        )
+
     # --- Hauptschleife -------------------------------------------------
 
     async def run(self) -> None:
@@ -113,11 +165,18 @@ class TwilioMediaStreamSession:
                 await self._wait_for_start()
             else:
                 await self.call_service.mark_answered(self.call_id)
+            logger.info(
+                "[CALL] answered call_id=%s streamSid=%s callSid=%s",
+                self.call_id,
+                self.stream_sid,
+                self.call_sid,
+            )
+            self._set_state(MediaSessionState.CONNECTED)
 
             self._receiver_task = asyncio.create_task(self._receive_loop())
             self._tts_warmup_task = asyncio.create_task(self._warm_tts_provider())
 
-            opening = self.dario.opening_line()
+            opening = self.opening_text or self.dario.opening_line()
             logger.info(
                 "[GREETING] starting call_id=%s streamSid=%s callSid=%s",
                 self.call_id,
@@ -150,6 +209,7 @@ class TwilioMediaStreamSession:
                         if timeout_outcome.reply_text:
                             await self._speak(timeout_outcome.reply_text)
                         if timeout_outcome.call_ended:
+                            self._set_state(MediaSessionState.ENDING)
                             await self._hangup_real_call()
                             break
                         continue
@@ -158,18 +218,42 @@ class TwilioMediaStreamSession:
                         if no_response_outcome.reply_text:
                             await self._speak(no_response_outcome.reply_text)
                         if no_response_outcome.call_ended:
+                            self._set_state(MediaSessionState.ENDING)
                             await self._hangup_real_call()
                             break
                     continue
+                llm_started_at = time.perf_counter()
+                logger.info(
+                    "[LLM] response started call_id=%s text_chars=%s",
+                    self.call_id,
+                    len(text),
+                )
+                self._set_state(MediaSessionState.THINKING)
                 outcome = await self.dario.process_utterance(text)
+                llm_finished_at = time.perf_counter()
+                logger.info(
+                    "[LLM] response finished call_id=%s reply_chars=%s",
+                    self.call_id,
+                    len(outcome.reply_text or ""),
+                )
+                self._log_latency(
+                    "stt_final_to_llm_first_token",
+                    self._last_stt_finished_at,
+                    llm_finished_at,
+                )
                 if outcome.reply_text:
-                    await self._speak(outcome.reply_text)
+                    await self._speak(
+                        outcome.reply_text,
+                        llm_started_at=llm_started_at,
+                    )
                 if outcome.call_ended:
+                    self._set_state(MediaSessionState.ENDING)
                     await self._hangup_real_call()
                     break
         except WebSocketDisconnect:
             logger.info("Twilio Media Stream getrennt (Call %s)", self.call_id)
         except Exception:
+            self._set_state(MediaSessionState.ERROR)
             logger.exception("Fehler in Twilio Media Stream Session (Call %s)", self.call_id)
         finally:
             if self._receiver_task is not None:
@@ -190,6 +274,7 @@ class TwilioMediaStreamSession:
                 except Exception:
                     logger.exception("Fehler beim Beenden des TTS-Warmups (Call %s)", self.call_id)
             await self._on_session_end()
+            self._set_state(MediaSessionState.ENDED)
 
     async def _warm_tts_provider(self) -> None:
         warmup = getattr(self.tts, "warmup", None)
@@ -212,7 +297,7 @@ class TwilioMediaStreamSession:
                 self.stream_sid = msg["start"]["streamSid"]
                 self.call_sid = msg["start"].get("callSid")
                 logger.info(
-                    "Twilio Media Stream gestartet: streamSid=%s callSid=%s",
+                    "[WS] start received streamSid=%s callSid=%s",
                     self.stream_sid,
                     self.call_sid,
                 )
@@ -274,9 +359,53 @@ class TwilioMediaStreamSession:
         for i in range(n_frames):
             frame = combined[i * frame_len : (i + 1) * frame_len]
             is_speech = self._vad.is_speech(frame.tobytes(), STT_SAMPLE_RATE)
-            if is_speech and self._speaking and self._barge_in_enabled:
-                self._barge_in_event.set()
-            if self._listening and self._endpoint.process_frame(is_speech):
+            speech_rms = (
+                float(np.sqrt(np.mean(frame.astype(np.float64) ** 2))) if len(frame) else 0.0
+            )
+            is_relevant_speech = is_speech and speech_rms >= 350.0
+
+            if self._listening:
+                now = time.perf_counter()
+                if is_relevant_speech and not self._last_speech_active:
+                    self._speech_started_at = now
+                    self._speech_ended_at = None
+                    logger.info(
+                        "[VAD] speech started call_id=%s streamSid=%s rms=%.0f",
+                        self.call_id,
+                        self.stream_sid,
+                        speech_rms,
+                    )
+                elif not is_relevant_speech and self._last_speech_active:
+                    self._speech_ended_at = now
+                    logger.info(
+                        "[VAD] speech ended call_id=%s streamSid=%s",
+                        self.call_id,
+                        self.stream_sid,
+                    )
+                self._last_speech_active = is_relevant_speech
+
+            if self._speaking and self._barge_in_enabled:
+                playback_ms = (
+                    (time.perf_counter() - self._playback_started_at) * 1000
+                    if self._playback_started_at is not None
+                    else 0.0
+                )
+                if is_relevant_speech and playback_ms >= 250:
+                    self._barge_in_speech_ms += VAD_FRAME_MS
+                else:
+                    self._barge_in_speech_ms = 0
+
+                if self._barge_in_speech_ms >= 120 and not self._barge_in_event.is_set():
+                    logger.info(
+                        "[BARGE_IN] detected call_id=%s streamSid=%s speech_ms=%s rms=%.0f playback_ms=%.0f",
+                        self.call_id,
+                        self.stream_sid,
+                        self._barge_in_speech_ms,
+                        speech_rms,
+                        playback_ms,
+                    )
+                    self._barge_in_event.set()
+            if self._listening and self._endpoint.process_frame(is_relevant_speech):
                 endpoint_hit = True
 
         self._vad_carry = combined[n_frames * frame_len :]
@@ -290,9 +419,11 @@ class TwilioMediaStreamSession:
         wav_path: str | None = None,
         label: str = "tts",
         allow_barge_in: bool = True,
+        llm_started_at: float | None = None,
     ) -> None:
         if self._stopped.is_set():
             return
+        tts_started_at = time.perf_counter()
 
         if wav_path is not None:
             size = Path(wav_path).stat().st_size if Path(wav_path).exists() else 0
@@ -307,7 +438,13 @@ class TwilioMediaStreamSession:
                 self.call_id,
                 label,
             )
-            await self._stream_wav_file(wav_path, allow_barge_in=allow_barge_in)
+            self._log_latency("llm_start_to_tts_start", llm_started_at, tts_started_at)
+            await self._stream_wav_file(
+                wav_path,
+                allow_barge_in=allow_barge_in,
+                label=label,
+                tts_started_at=tts_started_at,
+            )
             return
 
         cached = get_cached_tts(self.tts, text, label=label)
@@ -323,7 +460,13 @@ class TwilioMediaStreamSession:
                 self.call_id,
                 label,
             )
-            await self._stream_wav_file(str(cached.path), allow_barge_in=allow_barge_in)
+            self._log_latency("llm_start_to_tts_start", llm_started_at, tts_started_at)
+            await self._stream_wav_file(
+                str(cached.path),
+                allow_barge_in=allow_barge_in,
+                label=label,
+                tts_started_at=tts_started_at,
+            )
             return
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -336,6 +479,7 @@ class TwilioMediaStreamSession:
                 type(self.tts).__name__,
                 len(text),
             )
+            self._log_latency("llm_start_to_tts_start", llm_started_at, tts_started_at)
             await self.tts.synthesize(text, generated_wav_path)
             size = Path(generated_wav_path).stat().st_size
             logger.info(
@@ -346,11 +490,22 @@ class TwilioMediaStreamSession:
             )
             if self._stopped.is_set():
                 return
-            await self._stream_wav_file(generated_wav_path, allow_barge_in=allow_barge_in)
+            await self._stream_wav_file(
+                generated_wav_path,
+                allow_barge_in=allow_barge_in,
+                label=label,
+                tts_started_at=tts_started_at,
+            )
         finally:
             Path(generated_wav_path).unlink(missing_ok=True)
 
-    async def _stream_wav_file(self, wav_path: str, allow_barge_in: bool = True) -> None:
+    async def _stream_wav_file(
+        self,
+        wav_path: str,
+        allow_barge_in: bool = True,
+        label: str = "tts",
+        tts_started_at: float | None = None,
+    ) -> None:
         import soundfile as sf
 
         if self.stream_sid is None:
@@ -373,6 +528,7 @@ class TwilioMediaStreamSession:
         pcm = np.clip(pcm_float * 32767.0, -32768, 32767).astype(np.int16)
         pcm_8k = resample_pcm16(pcm, src_rate, TWILIO_SAMPLE_RATE)
         mulaw = pcm16_to_mulaw(pcm_8k)
+        self._write_audio_debug(mulaw, label=label)
 
         loop = asyncio.get_event_loop()
         next_send = loop.time()
@@ -381,8 +537,11 @@ class TwilioMediaStreamSession:
 
         if not allow_barge_in:
             self._barge_in_event.clear()
+        self._barge_in_speech_ms = 0
+        self._playback_started_at = time.perf_counter()
         self._barge_in_enabled = allow_barge_in
         self._speaking = True
+        self._set_state(MediaSessionState.SPEAKING)
         try:
             for i in range(0, len(mulaw), FRAME_SAMPLES_8K):
                 if self._stopped.is_set():
@@ -408,6 +567,20 @@ class TwilioMediaStreamSession:
                     )
                 )
                 chunks_sent += 1
+                if chunks_sent == 1:
+                    logger.info(
+                        "[TTS] first audio ready call_id=%s label=%s source_wav=%s",
+                        self.call_id,
+                        label,
+                        Path(wav_path).name,
+                    )
+                    logger.info(
+                        "[AUDIO] first chunk sent call_id=%s streamSid=%s label=%s",
+                        self.call_id,
+                        self.stream_sid,
+                        label,
+                    )
+                    self._log_latency("tts_start_to_first_audio_sent", tts_started_at)
                 # In Echtzeit-Kadenz senden (statt alles auf einmal): nur so
                 # bleibt waehrend der Wiedergabe ein tatsaechliches Zeitfenster,
                 # in dem Barge-In die restliche, noch nicht gesendete Antwort
@@ -420,12 +593,37 @@ class TwilioMediaStreamSession:
             self._speaking = False
             self._barge_in_enabled = False
             self._barge_in_event.clear()
+            self._barge_in_speech_ms = 0
+            self._playback_started_at = None
             logger.info(
                 "[AUDIO] chunks sent=%s call_id=%s streamSid=%s",
                 chunks_sent,
                 self.call_id,
                 self.stream_sid,
             )
+            logger.info(
+                "[AUDIO] playback complete call_id=%s streamSid=%s label=%s",
+                self.call_id,
+                self.stream_sid,
+                label,
+            )
+
+    def _write_audio_debug(self, mulaw: np.ndarray, label: str) -> None:
+        if self.audio_debug_dir is None:
+            return
+        try:
+            self.audio_debug_dir.mkdir(parents=True, exist_ok=True)
+            safe_label = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in label)
+            stream_suffix = (self.stream_sid or "nostream")[-8:]
+            path = (
+                self.audio_debug_dir
+                / f"call_{self.call_id}_{stream_suffix}_{safe_label}_twilio_decoded.wav"
+            )
+            decoded_pcm = mulaw_to_pcm16(mulaw)
+            write_wav(str(path), decoded_pcm.tobytes(), sample_rate=TWILIO_SAMPLE_RATE)
+            logger.info("[AUDIO] debug wav written call_id=%s path=%s", self.call_id, path)
+        except Exception:
+            logger.exception("[AUDIO] debug wav failed call_id=%s label=%s", self.call_id, label)
 
     async def _send_clear(self) -> None:
         await self.ws.send_text(json.dumps({"event": "clear", "streamSid": self.stream_sid}))
@@ -437,7 +635,13 @@ class TwilioMediaStreamSession:
         self._endpoint.reset()
         self._utterance_ready.clear()
         self._last_listen_end_reason = "timeout"
+        self._last_speech_active = False
+        self._speech_started_at = None
+        self._speech_ended_at = None
         self._listening = True
+        self._set_state(
+            MediaSessionState.WAITING if self.dario.context.wait_mode else MediaSessionState.LISTENING
+        )
         logger.info(
             "[LISTEN] started call_id=%s streamSid=%s max_seconds=%.1f",
             self.call_id,
@@ -453,6 +657,14 @@ class TwilioMediaStreamSession:
                 pass
         finally:
             self._listening = False
+            if self._last_speech_active:
+                self._speech_ended_at = time.perf_counter()
+                self._last_speech_active = False
+                logger.info(
+                    "[VAD] speech ended call_id=%s streamSid=%s",
+                    self.call_id,
+                    self.stream_sid,
+                )
 
         if self._stopped.is_set() or not self._current_utterance:
             logger.info(
@@ -486,11 +698,17 @@ class TwilioMediaStreamSession:
                 duration_seconds,
             )
             result = await self.stt.transcribe(wav_path)
+            self._last_stt_finished_at = time.perf_counter()
             logger.info(
                 "[STT] transcription finished call_id=%s chars=%s text=%r",
                 self.call_id,
                 len(result.text),
                 result.text[:160],
+            )
+            self._log_latency(
+                "speech_end_to_stt_final",
+                self._speech_ended_at,
+                self._last_stt_finished_at,
             )
             return result.text
         finally:
@@ -503,9 +721,11 @@ class TwilioMediaStreamSession:
         if not self.call_sid:
             return
         try:
+            logger.info("[CALL] ending call_id=%s callSid=%s", self.call_id, self.call_sid)
             await asyncio.get_event_loop().run_in_executor(
                 None, self.twilio_provider.end_call, self.call_sid
             )
+            logger.info("[CALL] ended call_id=%s callSid=%s", self.call_id, self.call_sid)
         except Exception:
             logger.exception("Konnte Twilio-Call %s nicht beenden", self.call_sid)
 

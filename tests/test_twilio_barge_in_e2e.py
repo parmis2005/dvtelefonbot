@@ -18,13 +18,16 @@ Dieser Test schliesst genau diese Luecke."""
 from __future__ import annotations
 
 import asyncio
+import base64
 
+import numpy as np
 import pytest
 
 import api.twilio as twilio_api
 import voice.vad as vad_module
 from phone import twilio_media_handler
-from tests.test_twilio_media_stream_e2e import FakeTwilioWebSocket, _make_media_event, _seed_call
+from tests.test_twilio_media_stream_e2e import FakeTwilioWebSocket, _seed_call
+from voice.codecs import pcm16_to_mulaw
 from voice.stt.base import TranscriptionResult
 from voice.stt.whisper_cpp import LocalWhisperProvider
 from voice.tts.chatterbox_tts import ChatterboxTTSProvider
@@ -44,6 +47,17 @@ TEST_MAX_UTTERANCE_SECONDS = 0.3
 # ueberhaupt messbar.
 _LONG_GREETING_SECONDS = 1.0
 _TOTAL_FRAMES_IF_UNINTERRUPTED = int(_LONG_GREETING_SECONDS * 1000 / 20)  # 20ms-Frames
+_FRAME_SAMPLES_8K = 160
+
+
+def _make_loud_media_event(stream_sid: str) -> dict:
+    pcm = np.full(_FRAME_SAMPLES_8K, 12000, dtype=np.int16)
+    payload = pcm16_to_mulaw(pcm).tobytes()
+    return {
+        "event": "media",
+        "streamSid": stream_sid,
+        "media": {"payload": base64.b64encode(payload).decode("ascii")},
+    }
 
 
 def _write_long_silent_wav(path: str, seconds: float, rate: int) -> str:
@@ -176,12 +190,12 @@ async def _feed_with_mid_speech_interruption(
     # der Anrufer dazwischen - der durchgehend laufende Empfangs-Task muss
     # das WAEHREND der Ausgabe verarbeiten (siehe Modul-Docstring).
     await asyncio.sleep(0.08)
-    ws.push(_make_media_event(stream_sid))
+    ws.push(_make_loud_media_event(stream_sid))
 
     elapsed = 0.08
     step = 0.05
     while elapsed < total_seconds:
-        ws.push(_make_media_event(stream_sid))
+        ws.push(_make_loud_media_event(stream_sid))
         await asyncio.sleep(step)
         elapsed += step
     ws.push({"event": "stop"})

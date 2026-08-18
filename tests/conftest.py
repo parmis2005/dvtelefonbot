@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest_asyncio
 
-import services.tts_cache as tts_cache
 from core.config import get_settings
 from database.database import get_session_factory, init_db, reset_engine_for_tests
 from database.repository import LeadRepository
+from services import tts_cache
 
 
 @pytest_asyncio.fixture

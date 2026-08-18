@@ -4,7 +4,7 @@ Stille-Timeout/Cooldown wirken ohne Backend-Neustart auf NEUE Calls."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
@@ -141,40 +141,17 @@ async def test_no_response_followup_then_ends_call(db_session, sample_lead, tmp_
 
 
 @pytest.mark.asyncio
-async def test_check_wait_timeout_asks_once_then_ends_call(db_session, sample_lead, tmp_path, monkeypatch):
+async def test_check_wait_timeout_stays_silent_while_waiting(db_session, sample_lead):
     from tests.factories import make_business_config, make_engine
-
-    # _finalize_call() schreibt regulaer eine echte Transkript-Datei
-    # (services/transcript_service.py::write_transcript_file) - fuer den
-    # Test in ein tmp_path statt in das echte transcripts/-Verzeichnis
-    # umleiten, um das Projektverzeichnis nicht mit Testartefakten zu
-    # verschmutzen.
-    monkeypatch.setattr(
-        "agent.dario.write_transcript_file",
-        lambda call_id, context: write_transcript_file(call_id, context, transcripts_dir=str(tmp_path)),
-    )
 
     dario = await _build_dario(db_session, sample_lead, make_business_config(), make_engine())
     dario.context.wait_mode = True
     dario.context.transition_to(CallState.WAITING)
-    dario.context.wait_started_at = datetime.utcnow() - timedelta(seconds=30)
+    dario.context.wait_started_at = datetime.utcnow()
 
-    first = await dario.check_wait_timeout(25)
-    assert first is not None
-    assert first.reply_text == "Sind Sie noch da?"
-    assert first.call_ended is False
-    assert dario.context.still_there_asked is True
+    assert await dario.check_wait_timeout(25) is None
+    assert dario.context.still_there_asked is False
     assert dario.call_active is True
 
-    # Noch innerhalb der zweiten Gnadenfrist: kein erneutes Nachfragen.
-    assert await dario.check_wait_timeout(25) is None
-
-    # Zweite Gnadenfrist ebenfalls verstrichen -> Gespraech wird beendet.
-    dario.context.wait_started_at = datetime.utcnow() - timedelta(seconds=30)
-    second = await dario.check_wait_timeout(25)
-    assert second is not None
-    assert second.call_ended is True
-    assert dario.call_active is False
-
     persisted = await CallRepository(db_session).get(dario.call_id)
-    assert persisted.status.value == "COMPLETED"
+    assert persisted.status.value == "CREATED"

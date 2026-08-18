@@ -270,6 +270,10 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             max_utterance_seconds=max(3.0, min(float(settings.silence_timeout), 5.0)),
             wait_timeout_seconds=settings.wait_timeout,
             greeting_audio_path=str(greeting_audio.path),
+            opening_text=opening,
+            audio_debug_dir=(
+                settings.twilio_audio_debug_dir if settings.twilio_audio_debug_enabled else None
+            ),
         )
         try:
             await session_handler.run()

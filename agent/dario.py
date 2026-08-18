@@ -8,7 +8,6 @@ Gespraechslogik.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +19,8 @@ from core.logging import get_logger
 from database.models import Lead
 from database.repository import LeadRepository, PromptVersionRepository
 from services.call_service import CallService
-from services.summary_service import build_summary
 from services.dashboard_state_export import export_dashboard_state_safely
+from services.summary_service import build_summary
 from services.transcript_service import persist_transcript, write_transcript_file
 from tools.call_tools import ToolExecutor
 
@@ -107,35 +106,13 @@ class Dario:
         """Wird vom Telefonie-Pfad (siehe phone/twilio_media_handler.py) nach
         jeder ergebnislosen Zuhoer-Phase (Stille) aufgerufen. Greift nur, wenn
         der Kunde zuvor explizit um eine Wartepause gebeten hat
-        (ConversationContext.wait_mode, siehe agent/conversation.py) - reine
-        Gespraechspausen ausserhalb des Wait-Mode loesen hier nichts aus.
-        Nach `timeout_seconds` Stille fragt Dario einmalig nach ("Sind Sie
-        noch da?"), bleibt fuer eine zweite gleich lange Gnadenfrist still und
-        beendet das Gespraech erst danach hoeflich (ueber denselben
-        _finalize_call()-Pfad wie jedes andere regulaere Gespraechsende -
-        Transkript/Zusammenfassung werden dabei genauso persistiert)."""
+        (ConversationContext.wait_mode, siehe agent/conversation.py). Im Wait
+        Mode bleibt Dario still, bis der Kunde wieder spricht; es gibt kein
+        automatisches Nachfragen und kein automatisches Auflegen."""
+        del timeout_seconds
         if not self.call_active or not self.context.wait_mode or self.context.wait_started_at is None:
             return None
-
-        elapsed = (datetime.utcnow() - self.context.wait_started_at).total_seconds()
-        if elapsed < timeout_seconds:
-            return None
-
-        if not self.context.still_there_asked:
-            self.context.still_there_asked = True
-            self.context.wait_started_at = datetime.utcnow()  # zweite Gnadenfrist
-            text = self.engine.responses.still_there()
-            self.context.add_turn("dario", text)
-            return TurnOutcome(reply_text=text)
-
-        # Bereits einmal nachgefragt, immer noch keine Reaktion -> hoeflich beenden.
-        self.context.call_result = self.context.call_result or "NO_ANSWER"
-        self.context.transition_to(CallState.GOODBYE)
-        text = self.engine.responses.farewell_reply()
-        self.context.add_turn("dario", text)
-        await self._finalize_call()
-        self.call_active = False
-        return TurnOutcome(reply_text=text, call_ended=True)
+        return None
 
     async def handle_no_response(self) -> TurnOutcome | None:
         """Reagiert auf echte Stille ausserhalb des expliziten Wait-Modes.

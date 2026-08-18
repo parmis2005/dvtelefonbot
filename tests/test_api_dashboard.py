@@ -16,10 +16,10 @@ from fastapi.testclient import TestClient
 
 import app.main as app_main
 import services.campaign_service as campaign_service_module
-import services.dashboard_state_export as dashboard_state_export
 from core.config import get_settings
 from database.database import get_session_factory, reset_engine_for_tests
 from database.repository import CallRepository, CampaignRepository
+from services import dashboard_state_export
 from services.greeting_audio import PreparedGreeting
 
 
