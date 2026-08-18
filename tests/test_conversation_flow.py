@@ -23,7 +23,7 @@ async def test_opening_line_matches_mandated_greeting():
 
     assert opening == (
         "Guten Tag! Hier ist Dario der digitale Assistent von Digital Vision aus "
-        "Mönchengladbach. Haben Sie.. gerade einen Moment Zeit???"
+        "Mönchengladbach. Haben Sie gerade einen Moment Zeit???"
     )
 
 

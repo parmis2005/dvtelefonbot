@@ -40,7 +40,7 @@ class ResponseBank:
         )
         return (
             f"Guten Tag! Hier ist {self.agent_name} der digitale Assistent von "
-            f"{self.company_name} aus {location}. Haben Sie.. gerade einen Moment Zeit???"
+            f"{self.company_name} aus {location}. Haben Sie gerade einen Moment Zeit???"
         )
 
     def gatekeeper_ask_responsible(self) -> str:
