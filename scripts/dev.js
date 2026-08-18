@@ -200,6 +200,7 @@ async function startBackend() {
       "30",
       "--ws-ping-timeout",
       "120",
+      "--proxy-headers",
     ],
     {
       cwd: ROOT,

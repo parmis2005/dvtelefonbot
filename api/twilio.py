@@ -73,6 +73,22 @@ async def _validate_twilio_request(request: Request, form: dict) -> None:
         raise HTTPException(status_code=403, detail="Ungueltige Twilio-Signatur")
 
 
+def _websocket_url_from_request(request: Request, call_id: int) -> str:
+    """Build the Media-Stream URL from the public request Twilio actually used.
+
+    This avoids stale TWILIO_PUBLIC_BASE_URL values when ngrok was started
+    automatically for the current test-call run.
+    """
+    forwarded_host = request.headers.get("x-forwarded-host", "")
+    host = (forwarded_host.split(",")[0].strip() if forwarded_host else "") or request.headers.get(
+        "host", ""
+    ) or request.url.netloc
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    proto = (forwarded_proto.split(",")[0].strip().lower() if forwarded_proto else "") or request.url.scheme
+    ws_scheme = "wss" if proto == "https" else "ws"
+    return f"{ws_scheme}://{host}/twilio/media-stream?call_id={call_id}"
+
+
 @router.post("/voice")
 async def twilio_voice_webhook(request: Request, call_id: int = Query(...)) -> Response:
     form = dict(await request.form())
@@ -86,14 +102,10 @@ async def twilio_voice_webhook(request: Request, call_id: int = Query(...)) -> R
         call_status,
     )
 
-    settings = get_settings()
     # call_id steht zusaetzlich als Query-Param in der URL (guenstiger,
     # harmloser Fallback), massgeblich ist aber das <Parameter>-Element -
     # siehe TwilioProvider.build_connect_stream_twiml fuer den Hintergrund.
-    ws_url = (
-        settings.twilio_public_base_url.replace("https://", "wss://").replace("http://", "ws://")
-        + f"/twilio/media-stream?call_id={call_id}"
-    )
+    ws_url = _websocket_url_from_request(request, call_id)
     twiml = TwilioProvider.build_connect_stream_twiml(ws_url, call_id)
     logger.info("TwiML-Webhook fuer Call %s ausgeliefert (Stream: %s)", call_id, ws_url)
     return Response(content=twiml, media_type="application/xml")

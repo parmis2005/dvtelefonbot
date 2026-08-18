@@ -227,7 +227,7 @@ source .venv/bin/activate
 python -m app.chat_test             # Text-Test (kein Telefon/Audio noetig)
 python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + TTS-Provider)
 uvicorn app.main:app --reload       # API + einfaches Jinja2-Dashboard (http://127.0.0.1:8000)
-npm run dev                         # echter Twilio-Testanruf (fragt vor dem Anruf nach Bestaetigung)
+npm run dev                         # startet Backend+ngrok und dann den bestaetigungspflichtigen Twilio-Testanruf
 npm run dashboard                   # Backend + DVTelefonbot Dashboard gemeinsam starten
 python -m scripts.import_leads_csv --file leads.csv
 

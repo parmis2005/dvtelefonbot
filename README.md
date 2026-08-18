@@ -276,7 +276,25 @@ Nutzt exakt dieselbe Dario-Engine wie Asterisk/Text-/Voice-Test.
 **1. `.env` befuellen** (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
 `TWILIO_CALLER_ID` = deine verifizierte Twilio-Nummer, `TWILIO_TEST_NUMBER`).
 
-**2. Server starten:**
+**2. Testanruf automatisch vorbereiten und ausloesen (empfohlen):**
+
+```bash
+npm run dev
+```
+
+Dieser Root-Befehl startet bei Bedarf automatisch das Backend auf Port 8000
+und `ngrok http 8000`, liest die aktuelle ngrok-URL aus und reicht sie nur
+fuer diesen Lauf an Backend/Testcall weiter. Danach prueft er Twilio-
+Zugangsdaten und Webhook-Erreichbarkeit, zeigt eine Zusammenfassung und fragt
+explizit `Jetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen:` - erst nach
+Eingabe von `ja` wird der echte, kostenpflichtige Anruf ausgeloest.
+
+Nach einem ausgeloesten Call bleiben Backend und ngrok im Terminal aktiv,
+damit Dario im laufenden Telefonat antworten kann. Nach dem Telefonat im
+Terminal `Ctrl+C` druecken, um die automatisch gestarteten Prozesse sauber zu
+beenden.
+
+**3. Manuelle Alternative fuer Diagnose/Entwicklung:**
 
 ```bash
 source .venv/bin/activate
@@ -295,7 +313,7 @@ wertet die WebSocket-Verbindung das faelschlich als tot und trennt mitten in
 Darios Antwort (siehe CLAUDE.md "Grenzen der aktuellen Version"). Mit
 `TTS_PROVIDER=local_piper` sind die Standard-Timeouts unproblematisch.
 
-**3. Oeffentlichen Tunnel starten** (zweites Terminal):
+Oeffentlichen Tunnel separat starten:
 
 ```bash
 ngrok http 8000
@@ -303,36 +321,35 @@ ngrok http 8000
 
 Einmalig einen kostenlosen ngrok-Account samt Authtoken einrichten
 (`ngrok config add-authtoken <dein-token>`, siehe https://dashboard.ngrok.com).
-Die angezeigte `https://....ngrok-free.app`-URL (ohne abschliessenden Slash)
-in `.env` als `TWILIO_PUBLIC_BASE_URL` eintragen. Bei jedem Neustart von
+Wenn dieser manuelle Weg genutzt wird, muss die angezeigte
+`https://....ngrok-free.app`-URL (ohne abschliessenden Slash) in `.env` als
+`TWILIO_PUBLIC_BASE_URL` eingetragen werden. Bei jedem Neustart von
 `ngrok http` aendert sich die URL (kostenloser Plan) - `.env` entsprechend
 aktualisieren.
 
-**4. Testanruf vorbereiten und ausloesen** (drittes Terminal):
+Testanruf im dritten Terminal starten:
 
 ```bash
-npm run dev
+python -m app.twilio_test_call
 ```
 
-Prueft Zugangsdaten und Erreichbarkeit des Webhooks, zeigt eine
-Zusammenfassung und fragt explizit `Jetzt wirklich anrufen? Tippe 'ja' zum
-Bestaetigen:` - erst nach Eingabe von `ja` wird der echte, kostenpflichtige
-Anruf ausgeloest. Sobald abgenommen wird, verbindet Twilio den Call an
-Darios Media-Stream-WebSocket (`/twilio/media-stream`) - STT, Conversation
-Engine und TTS laufen dann in Echtzeit genau wie im lokalen Voice-Test.
+Sobald abgenommen wird, verbindet Twilio den Call an Darios
+Media-Stream-WebSocket (`/twilio/media-stream`) - STT, Conversation Engine und
+TTS laufen dann in Echtzeit genau wie im lokalen Voice-Test.
 
 Call-Status, Transkript und Zusammenfassung landen wie gewohnt in der
 Datenbank/im Dashboard (`services/call_service.py`,
 `services/transcript_service.py`, `services/summary_service.py`).
 
-**Wichtig vor JEDEM echten Anruf:** Terminal 1 (`uvicorn`) UND Terminal 2
-(`ngrok`) muessen GLEICHZEITIG laufen, und die `TWILIO_PUBLIC_BASE_URL` in
-`.env` muss exakt der aktuell angezeigten ngrok-URL entsprechen (bei jedem
-`ngrok http`-Neustart aendert sie sich). Ein Anruf, der zwar klingelt und
-angenommen wird, aber sofort danach mit einer Fehleransage abbricht, bedeutet
-fast immer: einer der beiden Prozesse lief zu diesem Zeitpunkt nicht (bzw.
-die URL ist veraltet) - Twilio meldet das als Fehler 11200 ("Got HTTP 502
-response"), siehe CLAUDE.md. Vor einem Testanruf pruefen:
+**Wichtig vor JEDEM echten Anruf:** Bei `npm run dev` erledigt der Wrapper
+Backend/ngrok automatisch. Beim manuellen Weg muessen Terminal 1 (`uvicorn`)
+UND Terminal 2 (`ngrok`) GLEICHZEITIG laufen, und die
+`TWILIO_PUBLIC_BASE_URL` in `.env` muss exakt der aktuell angezeigten
+ngrok-URL entsprechen. Ein Anruf, der zwar klingelt und angenommen wird, aber
+sofort danach mit einer Fehleransage abbricht, bedeutet fast immer: einer der
+beiden Prozesse lief zu diesem Zeitpunkt nicht (bzw. die URL ist veraltet) -
+Twilio meldet das als Fehler 11200 ("Got HTTP 502 response"), siehe
+CLAUDE.md. Vor einem manuellen Testanruf pruefen:
 
 ```bash
 curl -s $(grep TWILIO_PUBLIC_BASE_URL .env | cut -d= -f2)/api/health
