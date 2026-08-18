@@ -76,19 +76,6 @@ def build_tts_provider(settings: Settings) -> TextToSpeechProvider:
             max_attempts=settings.chatterbox_max_attempts,
             reference_audio_path=settings.chatterbox_reference_audio_path or None,
         )
-    if settings.tts_provider == "elevenlabs":
-        from voice.tts.elevenlabs_tts import ElevenLabsTTSProvider
-
-        return ElevenLabsTTSProvider(
-            api_key=settings.elevenlabs_api_key,
-            voice_id=settings.elevenlabs_voice_id,
-            model_id=settings.elevenlabs_model_id,
-            output_format=settings.elevenlabs_output_format,
-            stability=settings.elevenlabs_stability,
-            similarity_boost=settings.elevenlabs_similarity_boost,
-            style=settings.elevenlabs_style,
-            use_speaker_boost=settings.elevenlabs_use_speaker_boost,
-        )
     raise ValueError(f"Unbekannter TTS_PROVIDER: {settings.tts_provider}")
 
 
@@ -99,8 +86,6 @@ def _tts_signature(settings: Settings, reference_audio_path: str | None,
                     exaggeration: float, cfg_weight: float, temperature: float) -> tuple:
     return (
         settings.tts_provider,
-        settings.elevenlabs_voice_id if settings.tts_provider == "elevenlabs" else "",
-        settings.elevenlabs_model_id if settings.tts_provider == "elevenlabs" else "",
         reference_audio_path or "",
         round(exaggeration, 4),
         round(cfg_weight, 4),
@@ -156,8 +141,6 @@ async def get_tts_provider(session: AsyncSession | None = None) -> TextToSpeechP
             max_attempts=settings.chatterbox_max_attempts,
             reference_audio_path=reference_audio_path,
         )
-    elif settings.tts_provider == "elevenlabs":
-        provider = build_tts_provider(settings)
     else:
         provider = build_tts_provider(settings)
 

@@ -74,18 +74,6 @@ class Settings(BaseSettings):
     # dieser Referenzaufnahme geklont (siehe voice/tts/chatterbox_tts.py).
     chatterbox_reference_audio_path: str = ""
 
-    # TTS (ElevenLabs) - optionale Cloud-Stimme fuer hoehere Qualitaet als
-    # lokale CPU-TTS. Aktivieren mit TTS_PROVIDER=elevenlabs und gesetztem
-    # ELEVENLABS_API_KEY/ELEVENLABS_VOICE_ID.
-    elevenlabs_api_key: str = ""
-    elevenlabs_voice_id: str = ""
-    elevenlabs_model_id: str = "eleven_turbo_v2_5"
-    elevenlabs_output_format: str = "pcm_16000"
-    elevenlabs_stability: float = 0.45
-    elevenlabs_similarity_boost: float = 0.85
-    elevenlabs_style: float = 0.15
-    elevenlabs_use_speaker_boost: bool = True
-
     # Asterisk / ARI
     asterisk_ari_url: str = "http://127.0.0.1:8088"
     asterisk_ari_app: str = "dario"
