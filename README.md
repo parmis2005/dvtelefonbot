@@ -283,6 +283,12 @@ source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-ping-interval 30 --ws-ping-timeout 120
 ```
 
+Alternativ, wenn Dashboard und Backend gemeinsam laufen sollen:
+
+```bash
+npm run dashboard
+```
+
 Die laengeren Ping-Timeouts sind bewusst: Chatterbox braucht auf CPU pro
 Antwort ca. 15-45s reine Generierungszeit; mit den Standard-Timeouts (20s)
 wertet die WebSocket-Verbindung das faelschlich als tot und trennt mitten in
@@ -305,7 +311,7 @@ aktualisieren.
 **4. Testanruf vorbereiten und ausloesen** (drittes Terminal):
 
 ```bash
-python -m app.twilio_test_call
+npm run dev
 ```
 
 Prueft Zugangsdaten und Erreichbarkeit des Webhooks, zeigt eine
@@ -353,8 +359,8 @@ klaren Fehlermeldung, statt den Kunden umsonst klingeln zu lassen.
 | E-Mail wird nie als "gesendet" bestaetigt | SMTP-Zugangsdaten fehlen/falsch (`.env`) | `SMTP_*` Variablen pruefen; das ist bewusstes Verhalten (kein falscher Versand-Claim) |
 | `pytest` findet `webrtcvad`-Importfehler | `pkg_resources` fehlt (neue `setuptools`-Version) | `pip install -e ".[voice]"` installiert automatisch `setuptools<81` |
 | Anruf wird trotz "nicht mehr anrufen" erneut versucht | Sollte nicht vorkommen - Do-Not-Call ist persistent in DB | `tests/test_do_not_call.py` ausfuehren, Datenbank pruefen (`do_not_call` Tabelle) |
-| `twilio_test_call`: "TWILIO_PUBLIC_BASE_URL fehlt" | Tunnel noch nicht gestartet/eingetragen | Schritt 15.3 (ngrok), URL ohne abschliessenden Slash in `.env` |
-| `twilio_test_call`: Webhook "nicht erreichbar" (Warnung) | `uvicorn` oder `ngrok` laeuft nicht/ist abgestuerzt | Beide Terminals pruefen; Warnung blockiert den Anruf nicht, macht ihn aber sinnlos |
+| `npm run dev`: "TWILIO_PUBLIC_BASE_URL fehlt" | Tunnel noch nicht gestartet/eingetragen | Schritt 15.3 (ngrok), URL ohne abschliessenden Slash in `.env` |
+| `npm run dev`: Webhook "nicht erreichbar" (Warnung) | `uvicorn` oder `ngrok` laeuft nicht/ist abgestuerzt | Beide Terminals pruefen; Warnung blockiert den Anruf nicht, macht ihn aber sinnlos |
 | Twilio-Anruf klingelt, aber Dario bleibt stumm/Verbindung bricht ab | WebSocket-Ping-Timeout waehrend langer Chatterbox-Generierung | `--ws-ping-interval`/`--ws-ping-timeout` wie in Schritt 15.2 setzen, oder testweise `TTS_PROVIDER=local_piper` |
 | `403 Ungueltige Twilio-Signatur` auf `/twilio/voice` oder `/twilio/status` | Request kam nicht wirklich von Twilio (oder `TWILIO_PUBLIC_BASE_URL` stimmt nicht mit der tatsaechlich aufgerufenen URL ueberein) | `.env`-URL exakt mit der aktuellen ngrok-URL abgleichen |
 
@@ -399,16 +405,19 @@ sauber zu `/login` weiter.
 **Starten (lokal):**
 
 ```bash
-# Terminal 1: Backend
-source .venv/bin/activate
-uvicorn app.main:app --reload
+# Backend + Dashboard gemeinsam starten (Projekt-Root)
+npm run dashboard
 
-# Terminal 2: Frontend
+# Nur das Frontend separat starten (falls Backend schon laeuft)
 cd frontend
 npm install   # einmalig
 cp .env.example .env.local   # einmalig, Default passt fuer lokale Entwicklung
 npm run dev
 ```
+
+Im Projekt-Root ist `npm run dev` bewusst NICHT das Dashboard, sondern der
+bestaetigungspflichtige echte Twilio-Testanruf. Erst wenn im Prompt exakt
+`ja` eingegeben wird, wird ein kostenpflichtiger Anruf ausgeloest.
 
 Dashboard: http://localhost:3000/ (leitet zu `/login`, falls nicht
 angemeldet). Zugangsdaten stehen in der lokalen `.env` des Backends

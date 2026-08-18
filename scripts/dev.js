@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Einziger lokaler Startbefehl fuer Digital Vision Dario: `npm run dev` im
- * Projekt-Wurzelverzeichnis startet Backend (FastAPI/uvicorn ueber die
+ * Lokaler Dashboard-Startbefehl fuer Digital Vision Dario: `npm run dashboard`
+ * im Projekt-Wurzelverzeichnis startet Backend (FastAPI/uvicorn ueber die
  * vorhandene .venv, Port 8000) UND Frontend (Next.js-Dashboard, Port 3000)
  * gemeinsam, prueft vorher, ob die Ports schon belegt sind (keine
  * doppelten Prozesse), wartet auf einen erfolgreichen Backend-Health-Check
@@ -187,10 +187,25 @@ async function startBackend() {
   }
 
   logDev(`Starte Backend (uvicorn, .venv) auf Port ${BACKEND_PORT} ...`);
-  const child = spawn(uvicornBin, ["app.main:app", "--reload", "--port", String(BACKEND_PORT)], {
-    cwd: ROOT,
-    env: process.env,
-  });
+  const child = spawn(
+    uvicornBin,
+    [
+      "app.main:app",
+      "--reload",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      String(BACKEND_PORT),
+      "--ws-ping-interval",
+      "30",
+      "--ws-ping-timeout",
+      "120",
+    ],
+    {
+      cwd: ROOT,
+      env: process.env,
+    }
+  );
   pipeWithPrefix(child.stdout, "backend", COLOR.magenta);
   pipeWithPrefix(child.stderr, "backend", COLOR.magenta);
   watchForUnexpectedExit(child, "Backend");

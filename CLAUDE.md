@@ -227,7 +227,8 @@ source .venv/bin/activate
 python -m app.chat_test             # Text-Test (kein Telefon/Audio noetig)
 python -m app.local_voice_test      # Voice-Test (Mikrofon/Lautsprecher, benoetigt whisper.cpp + TTS-Provider)
 uvicorn app.main:app --reload       # API + einfaches Jinja2-Dashboard (http://127.0.0.1:8000)
-python -m app.twilio_test_call      # echter Twilio-Testanruf (fragt vor dem Anruf nach Bestaetigung)
+npm run dev                         # echter Twilio-Testanruf (fragt vor dem Anruf nach Bestaetigung)
+npm run dashboard                   # Backend + DVTelefonbot Dashboard gemeinsam starten
 python -m scripts.import_leads_csv --file leads.csv
 
 cd frontend && npm run dev          # DVTelefonbot Dashboard (http://localhost:3000, siehe README Abschnitt 17)
@@ -363,7 +364,7 @@ schnellere, aber synthetischer klingende Alternative bestehen
     Stimme gilt: ein bereits laufendes Gespraech behaelt seine beim Start
     gepinnten Werte, ein NEUER Call bekommt automatisch die zuletzt im
     Dashboard gespeicherten Werte - kein Backend-Neustart noetig.
-  - **Cooldown-Ausnahme fuer `app/twilio_test_call.py`**: manuell mit "ja"
+  - **Cooldown-Ausnahme fuer `app/twilio_test_call.py` / `npm run dev`**: manuell mit "ja"
     bestaetigte CLI-Testanrufe umgehen den Cooldown bewusst
     (`CallService.can_start_call`/`start_call(..., ignore_cooldown=True)`),
     damit ein Testanruf nicht am Cooldown desselben Test-Leads aus einem
