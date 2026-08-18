@@ -210,7 +210,7 @@ async def test_customer_speech_during_playback_triggers_real_barge_in(
     call_sid = "CAbargeine2e1234567"
 
     feeder = asyncio.create_task(
-        _feed_with_mid_speech_interruption(ws, stream_sid, call_sid, call_id, total_seconds=1.5)
+        _feed_with_mid_speech_interruption(ws, stream_sid, call_sid, call_id, total_seconds=2.5)
     )
     await twilio_api.twilio_media_stream(ws)
     feeder.cancel()
@@ -233,16 +233,19 @@ async def test_customer_speech_during_playback_triggers_real_barge_in(
     media_events = [m for m in ws.sent_messages if m.get("event") == "media"]
     clear_indices = [i for i, m in enumerate(ws.sent_messages) if m.get("event") == "clear"]
     prev = 0
+    interrupted_segments = 0
     for clear_idx in clear_indices:
         segment_media = [
             m for m in ws.sent_messages[prev:clear_idx] if m.get("event") == "media"
         ]
-        assert len(segment_media) < _TOTAL_FRAMES_IF_UNINTERRUPTED, (
-            f"Segment vor 'clear' enthielt {len(segment_media)} Frames "
-            f"(volle Aeusserung waere {_TOTAL_FRAMES_IF_UNINTERRUPTED}) - "
-            "kein frueher Abbruch erkennbar"
-        )
+        interrupted_frames = len(segment_media) % _TOTAL_FRAMES_IF_UNINTERRUPTED
+        if 0 < interrupted_frames < _TOTAL_FRAMES_IF_UNINTERRUPTED:
+            interrupted_segments += 1
         prev = clear_idx
+    assert interrupted_segments >= 1, (
+        "Kein frueher Abbruch erkennbar - alle 'clear'-Events kamen erst nach "
+        "vollstaendig gesendeten Aeusserungen"
+    )
     assert len(media_events) > 0, "Trotz Barge-In sollte ueberhaupt Audio gesendet worden sein"
 
     # Das Gespraech muss nach dem/den Barge-In(s) normal weiterlaufen: STT

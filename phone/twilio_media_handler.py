@@ -328,7 +328,8 @@ class TwilioMediaStreamSession:
         frame_seconds = FRAME_MS / 1000
         chunks_sent = 0
 
-        self._barge_in_event.clear()
+        if not allow_barge_in:
+            self._barge_in_event.clear()
         self._barge_in_enabled = allow_barge_in
         self._speaking = True
         try:
