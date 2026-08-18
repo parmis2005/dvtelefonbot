@@ -7,8 +7,9 @@
  * - Backend auf Port 8000
  * - ngrok-Tunnel auf Port 8000
  *
- * Danach startet es app.twilio_test_call.py. Erst wenn dort exakt "ja"
- * eingegeben wird, wird ein kostenpflichtiger Twilio-Anruf ausgeloest.
+ * Danach startet es app.twilio_test_call.py. Ohne --yes wird erst bei exakt
+ * "ja" im Prompt ein kostenpflichtiger Twilio-Anruf ausgeloest. Mit
+ * `npm run dev -- --yes` gilt diese Bestaetigung als explizit erteilt.
  */
 
 "use strict";
@@ -361,13 +362,21 @@ async function main() {
     return;
   }
 
+  if (argsFromCli.includes("--yes")) {
+    logWarn("--yes erkannt: der Testanruf wird nach erfolgreichen Checks ohne Terminal-Prompt ausgeloest.");
+  }
+
   logCall("Bereite echten Twilio-Testanruf vor ...");
   const ngrok = await startNgrok();
   if (!ngrok) return;
   await startBackend(ngrok.publicUrl);
 
   logOk(`Aktuelle oeffentliche URL fuer diesen Lauf: ${ngrok.publicUrl}`);
-  logCall("Starte bestaetigungspflichtigen Testanruf-Prompt ...");
+  logCall(
+    argsFromCli.includes("--yes")
+      ? "Starte explizit bestaetigten Testanruf ..."
+      : "Starte bestaetigungspflichtigen Testanruf-Prompt ..."
+  );
   const result = await runTestCall(ngrok.publicUrl);
 
   if (result.signal) {

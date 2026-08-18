@@ -333,6 +333,19 @@ Testanruf im dritten Terminal starten:
 python -m app.twilio_test_call
 ```
 
+Wenn das integrierte Terminal den interaktiven `ja`-Prompt abbricht, kann der
+kostenpflichtige Testanruf explizit per Flag bestaetigt werden:
+
+```bash
+npm run dev -- --yes
+```
+
+Nur Checks ohne Anruf:
+
+```bash
+npm run dev -- --no-call
+```
+
 Sobald abgenommen wird, verbindet Twilio den Call an Darios
 Media-Stream-WebSocket (`/twilio/media-stream`) - STT, Conversation Engine und
 TTS laufen dann in Echtzeit genau wie im lokalen Voice-Test.

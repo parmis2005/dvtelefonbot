@@ -3,8 +3,9 @@
 Loest einen ECHTEN, kostenpflichtigen Outbound-Call ueber Twilio Programmable
 Voice aus, der an Darios bestehende STT -> Conversation Engine -> TTS
 Pipeline angebunden wird (siehe api/twilio.py, phone/twilio_media_handler.py).
-Fragt vor dem eigentlichen Anruf ausdruecklich im Terminal nach Bestaetigung
-und loest NIEMALS automatisch/unbeaufsichtigt einen Anruf aus.
+Fragt vor dem eigentlichen Anruf ausdruecklich im Terminal nach Bestaetigung,
+ausser der Nutzer uebergibt bewusst --yes. Ein Anruf wird nie ohne explizite
+Bestaetigung oder explizites --yes ausgeloest.
 
 Voraussetzungen:
   - `uvicorn app.main:app` laeuft (liefert den TwiML-Webhook + die
@@ -138,10 +139,17 @@ async def run(args: argparse.Namespace) -> int:
                 "(--to +49...) als TWILIO_CALLER_ID."
             )
 
-        answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
-        if answer != "ja":
-            print("Abgebrochen - kein Anruf ausgeloest.")
+        if args.no_call:
+            print("\nChecks erfolgreich. --no-call aktiv: kein Anruf ausgeloest.")
             return 0
+
+        if args.yes:
+            print("\n--yes gesetzt: Bestaetigung wurde ueber Kommandozeile erteilt.")
+        else:
+            answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
+            if answer != "ja":
+                print("Abgebrochen - kein Anruf ausgeloest.")
+                return 0
 
         call = await call_service.start_call(lead.id, ignore_cooldown=True)
         webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
@@ -177,6 +185,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Echter Twilio-Testanruf fuer Dario")
     parser.add_argument(
         "--to", type=str, default=None, help="Zielnummer (Standard: TWILIO_TEST_NUMBER aus .env)"
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Bestaetigt den kostenpflichtigen Testanruf explizit ohne interaktive Eingabe.",
+    )
+    parser.add_argument(
+        "--no-call",
+        action="store_true",
+        help="Fuehrt nur Checks bis [3/3] aus und loest keinen Anruf aus.",
     )
     return parser.parse_args()
 
