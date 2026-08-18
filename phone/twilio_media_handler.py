@@ -90,6 +90,7 @@ class TwilioMediaStreamSession:
         self._vad_carry = np.array([], dtype=np.int16)  # Rest-Samples < einem VAD-Frame
 
         self._speaking = False
+        self._barge_in_enabled = False
         self._listening = False
         self._barge_in_event = asyncio.Event()
 
@@ -119,7 +120,12 @@ class TwilioMediaStreamSession:
                 self.stream_sid,
                 self.call_sid,
             )
-            await self._speak(opening, wav_path=self.greeting_audio_path, label="greeting")
+            await self._speak(
+                opening,
+                wav_path=self.greeting_audio_path,
+                label="greeting",
+                allow_barge_in=False,
+            )
             logger.info(
                 "[GREETING] finished call_id=%s streamSid=%s stopped=%s",
                 self.call_id,
@@ -233,7 +239,7 @@ class TwilioMediaStreamSession:
         for i in range(n_frames):
             frame = combined[i * frame_len : (i + 1) * frame_len]
             is_speech = self._vad.is_speech(frame.tobytes(), STT_SAMPLE_RATE)
-            if is_speech and self._speaking:
+            if is_speech and self._speaking and self._barge_in_enabled:
                 self._barge_in_event.set()
             if self._listening and self._endpoint.process_frame(is_speech):
                 endpoint_hit = True
@@ -243,7 +249,13 @@ class TwilioMediaStreamSession:
 
     # --- Sprechen (TTS -> mu-law -> WebSocket) ---------------------------
 
-    async def _speak(self, text: str, wav_path: str | None = None, label: str = "tts") -> None:
+    async def _speak(
+        self,
+        text: str,
+        wav_path: str | None = None,
+        label: str = "tts",
+        allow_barge_in: bool = True,
+    ) -> None:
         if self._stopped.is_set():
             return
 
@@ -260,7 +272,7 @@ class TwilioMediaStreamSession:
                 self.call_id,
                 label,
             )
-            await self._stream_wav_file(wav_path)
+            await self._stream_wav_file(wav_path, allow_barge_in=allow_barge_in)
             return
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -283,11 +295,11 @@ class TwilioMediaStreamSession:
             )
             if self._stopped.is_set():
                 return
-            await self._stream_wav_file(generated_wav_path)
+            await self._stream_wav_file(generated_wav_path, allow_barge_in=allow_barge_in)
         finally:
             Path(generated_wav_path).unlink(missing_ok=True)
 
-    async def _stream_wav_file(self, wav_path: str) -> None:
+    async def _stream_wav_file(self, wav_path: str, allow_barge_in: bool = True) -> None:
         import soundfile as sf
 
         if self.stream_sid is None:
@@ -317,12 +329,19 @@ class TwilioMediaStreamSession:
         chunks_sent = 0
 
         self._barge_in_event.clear()
+        self._barge_in_enabled = allow_barge_in
         self._speaking = True
         try:
             for i in range(0, len(mulaw), FRAME_SAMPLES_8K):
                 if self._stopped.is_set():
                     break
                 if self._barge_in_event.is_set():
+                    logger.info(
+                        "[AUDIO] barge-in clear call_id=%s streamSid=%s chunks_sent=%s",
+                        self.call_id,
+                        self.stream_sid,
+                        chunks_sent,
+                    )
                     await self._send_clear()
                     break
                 chunk = mulaw[i : i + FRAME_SAMPLES_8K].tobytes()
@@ -347,6 +366,8 @@ class TwilioMediaStreamSession:
                     await asyncio.sleep(delay)
         finally:
             self._speaking = False
+            self._barge_in_enabled = False
+            self._barge_in_event.clear()
             logger.info(
                 "[AUDIO] chunks sent=%s call_id=%s streamSid=%s",
                 chunks_sent,

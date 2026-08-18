@@ -152,12 +152,39 @@ async def _feed_media_only_during_greeting_generation(
     ws.push_disconnect()
 
 
+async def _feed_media_during_greeting_playback(
+    ws: FakeTwilioWebSocket, stream_sid: str, call_sid: str, call_id: int
+) -> None:
+    ws.push({"event": "connected"})
+    ws.push(
+        {
+            "event": "start",
+            "start": {
+                "streamSid": stream_sid,
+                "callSid": call_sid,
+                "customParameters": {"call_id": str(call_id)},
+            },
+        }
+    )
+    await asyncio.sleep(0.05)
+    for _ in range(8):
+        ws.push(_make_media_event(stream_sid))
+        await asyncio.sleep(0.03)
+    await asyncio.sleep(1.1)
+    ws.push({"event": "stop"})
+    ws.push_disconnect()
+
+
 def _write_minimal_wav(path: str) -> str:
+    return _write_wav_frames(path, 200)  # ~9ms - haelt den Testlauf schnell
+
+
+def _write_wav_frames(path: str, frames: int) -> str:
     with wave.open(path, "wb") as f:
         f.setnchannels(1)
         f.setsampwidth(2)
         f.setframerate(22050)
-        f.writeframes(b"\x00\x00" * 200)  # ~9ms - haelt den Testlauf schnell
+        f.writeframes(b"\x00\x00" * frames)
     return path
 
 
@@ -370,6 +397,53 @@ async def test_customer_audio_during_tts_generation_does_not_cancel_greeting(
 
     media_events = [m for m in ws.sent_messages if m.get("event") == "media"]
     assert media_events, "Fruehe Kundengeraeusche duerfen die Begruessung nicht vorab abbrechen"
+    assert not any(m.get("event") == "clear" for m in ws.sent_messages)
+
+
+@pytest.mark.asyncio
+async def test_customer_audio_during_greeting_playback_does_not_barge_in(
+    db_session,
+    scripted_stt,
+    fake_twilio_end_call,
+    short_utterance_timeout,
+    monkeypatch,
+):
+    """Regression fuer den echten Call CAb0dda...: Die Begruessung wurde aus
+    dem Cache gestartet, aber nach nur einem Twilio-Media-Chunk abgebrochen,
+    weil eingehende Leitungsaudio/VAD sofort Barge-In ausloeste. Die erste
+    Begruessung muss vollstaendig rausgehen; Barge-In ist erst fuer spaetere
+    Antworten aktiv."""
+
+    async def long_synthesize(self, text: str, output_path: str) -> str:
+        return _write_wav_frames(output_path, 22050)  # ~1s
+
+    monkeypatch.setattr(ChatterboxTTSProvider, "synthesize", long_synthesize)
+    monkeypatch.setattr(ChatterboxTTSProvider, "is_available", lambda self: _true())
+    monkeypatch.setattr(
+        twilio_media_handler.VoiceActivityDetector,
+        "is_speech",
+        lambda self, frame, sample_rate: True,
+    )
+
+    _lead_id, call_id = await _seed_call(db_session)
+    scripted_stt([""])
+
+    ws = FakeTwilioWebSocket()
+    stream_sid = "MZspeechduringgreeting"
+    call_sid = "CAspeechduringgreeting"
+
+    feeder = asyncio.create_task(
+        _feed_media_during_greeting_playback(ws, stream_sid, call_sid, call_id)
+    )
+    await twilio_api.twilio_media_stream(ws)
+    feeder.cancel()
+    try:
+        await feeder
+    except asyncio.CancelledError:
+        pass
+
+    media_events = [m for m in ws.sent_messages if m.get("event") == "media"]
+    assert len(media_events) > 10, "Begruessung wurde direkt nach dem Start abgebrochen"
     assert not any(m.get("event") == "clear" for m in ws.sent_messages)
 
 
