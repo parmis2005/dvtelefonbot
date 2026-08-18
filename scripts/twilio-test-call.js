@@ -330,11 +330,21 @@ function runTestCall(publicUrl) {
     const child = spawn(pythonBin, childArgs, {
       cwd: ROOT,
       env: { ...process.env, TWILIO_PUBLIC_BASE_URL: publicUrl },
-      stdio: "inherit",
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
     child.on("exit", (code, signal) => {
       const exitCode = code ?? 1;
+      if (stderr.trim() && signal !== "SIGINT") {
+        process.stderr.write(stderr);
+      }
       resolve({ code: exitCode === 2 ? 0 : exitCode, signal, callTriggered: exitCode === 2 });
     });
     child.on("error", (err) => {
