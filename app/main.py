@@ -6,6 +6,7 @@ Start (Dev):
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -91,5 +92,9 @@ async def health() -> dict:
         "status": "ok",
         "agent": settings.agent_name,
         "company": settings.company_name,
+        "runtime": {
+            "pid": os.getpid(),
+            "source_root": str(Path(__file__).resolve().parent.parent),
+        },
         "secrets_configured": settings.secrets_configured,
     }

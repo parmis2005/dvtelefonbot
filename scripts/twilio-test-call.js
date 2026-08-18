@@ -19,7 +19,7 @@ const http = require("http");
 const net = require("net");
 const path = require("path");
 const readline = require("readline");
-const { spawn } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const BACKEND_PORT = 8000;
@@ -122,6 +122,14 @@ function httpGet(url) {
   });
 }
 
+function parseJson(body) {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+}
+
 async function waitFor(description, timeoutMs, intervalMs, fn) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -131,6 +139,93 @@ async function waitFor(description, timeoutMs, intervalMs, fn) {
     logCall(`Warte auf ${description} ...`);
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+function getListeningPids(port) {
+  try {
+    const output = execFileSync("lsof", [`-tiTCP:${port}`, "-sTCP:LISTEN"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return [
+      ...new Set(
+        output
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((pid) => Number(pid))
+          .filter(Boolean)
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function getProcessCommand(pid) {
+  try {
+    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function isProjectBackendProcess(pid) {
+  const command = getProcessCommand(pid);
+  return command.includes(ROOT) || (command.includes("uvicorn") && command.includes("app.main:app"));
+}
+
+async function waitForPortFree(port, timeoutMs = 10000) {
+  return await waitFor(`Port ${port} wird frei`, timeoutMs, 500, async () => {
+    return (await isPortInUse(port)) ? null : true;
+  });
+}
+
+async function stopExistingBackendIfSafe(reason) {
+  const pids = getListeningPids(BACKEND_PORT);
+  if (pids.length === 0) return true;
+
+  const commands = new Map(pids.map((pid) => [pid, getProcessCommand(pid)]));
+  const hasProjectBackend = [...commands.values()].some(
+    (command) => command.includes(ROOT) || (command.includes("uvicorn") && command.includes("app.main:app"))
+  );
+  const unsafe = pids.filter((pid) => {
+    const command = commands.get(pid) || "";
+    if (isProjectBackendProcess(pid)) return false;
+    if (hasProjectBackend && command.includes("Python") && command.includes("multiprocessing-fork")) {
+      return false;
+    }
+    return true;
+  });
+  if (unsafe.length > 0) {
+    logErr(`Port ${BACKEND_PORT} ist von einem fremden Prozess belegt: ${unsafe.join(", ")}`);
+    logErr("Ich beende fremde Prozesse nicht automatisch.");
+    return false;
+  }
+
+  logWarn(`${reason} Beende alte Backend-Prozesse auf Port ${BACKEND_PORT}: ${pids.join(", ")}`);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* Prozess bereits beendet */
+    }
+  }
+
+  if (await waitForPortFree(BACKEND_PORT)) return true;
+
+  logWarn(`Port ${BACKEND_PORT} ist noch belegt. Erzwinge Beenden der alten Backend-Prozesse.`);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* Prozess bereits beendet */
+    }
+  }
+
+  return Boolean(await waitForPortFree(BACKEND_PORT, 5000));
 }
 
 function pipeWithPrefix(stream, prefix, color) {
@@ -261,13 +356,28 @@ async function startBackend(publicUrl) {
   if (portInUse) {
     const health = await httpGet(HEALTH_URL);
     if (health.ok) {
-      logOk(`Backend laeuft bereits (${HEALTH_URL}).`);
-      return { started: false };
+      const payload = parseJson(health.body);
+      const sourceRoot = payload && payload.runtime && payload.runtime.source_root;
+      if (sourceRoot === ROOT) {
+        logOk(`Backend laeuft bereits mit aktuellem Projektcode (${HEALTH_URL}).`);
+        return { started: false };
+      }
+      const stopped = await stopExistingBackendIfSafe(
+        "Backend laeuft bereits, liefert aber keine aktuelle Runtime-Kennung."
+      );
+      if (!stopped) {
+        await shutdown(1);
+        return null;
+      }
+    } else {
+      const stopped = await stopExistingBackendIfSafe(
+        `Port ${BACKEND_PORT} ist belegt, aber ${HEALTH_URL} antwortet nicht korrekt.`
+      );
+      if (!stopped) {
+        await shutdown(1);
+        return null;
+      }
     }
-    logErr(`Port ${BACKEND_PORT} ist belegt, aber ${HEALTH_URL} antwortet nicht korrekt.`);
-    logErr("Bitte den blockierenden Prozess beenden oder den Port freimachen.");
-    await shutdown(1);
-    return null;
   }
 
   if (!fs.existsSync(uvicornBin)) {
@@ -324,9 +434,9 @@ async function startBackend(publicUrl) {
   return { started: true };
 }
 
-function runTestCall(publicUrl) {
+function runTestCall(publicUrl, callArgs = argsFromCli) {
   return new Promise((resolve) => {
-    const childArgs = ["-u", "-m", "app.twilio_test_call", ...argsFromCli];
+    const childArgs = ["-u", "-m", "app.twilio_test_call", ...callArgs];
     const child = spawn(pythonBin, childArgs, {
       cwd: ROOT,
       env: { ...process.env, TWILIO_PUBLIC_BASE_URL: publicUrl },
@@ -358,10 +468,15 @@ function needsNodeConfirmation() {
   return !argsFromCli.includes("--yes") && !argsFromCli.includes("--no-call");
 }
 
-function addYesFlagForChild() {
-  if (!argsFromCli.includes("--yes")) {
-    argsFromCli.push("--yes");
+function withoutFlags(args, flags) {
+  return args.filter((arg) => !flags.includes(arg));
+}
+
+function withFlag(args, flag) {
+  if (args.includes(flag)) {
+    return args;
   }
+  return [...args, flag];
 }
 
 function askForConfirmation() {
@@ -399,29 +514,55 @@ async function main() {
     logWarn("--yes erkannt: der Testanruf wird nach erfolgreichen Checks ohne Terminal-Prompt ausgeloest.");
   }
 
-  if (needsNodeConfirmation()) {
-    const confirmed = await askForConfirmation();
-    if (!confirmed) {
-      logCall("Abgebrochen - kein Anruf ausgeloest.");
-      return;
-    }
-    addYesFlagForChild();
-  }
-
   logCall("Bereite echten Twilio-Testanruf vor ...");
   const ngrok = await startNgrok();
   if (!ngrok) return;
   await startBackend(ngrok.publicUrl);
 
   logOk(`Aktuelle oeffentliche URL fuer diesen Lauf: ${ngrok.publicUrl}`);
-  logCall(
-    argsFromCli.includes("--no-call")
-      ? "Starte Checks ohne Anruf ..."
-      : argsFromCli.includes("--yes")
-        ? "Starte explizit bestaetigten Testanruf ..."
-        : "Starte bestaetigungspflichtigen Testanruf-Prompt ..."
-  );
-  const result = await runTestCall(ngrok.publicUrl);
+  if (argsFromCli.includes("--no-call") || argsFromCli.includes("--prepare-only")) {
+    logCall(argsFromCli.includes("--prepare-only") ? "Starte Vorbereitung ohne Anruf ..." : "Starte Checks ohne Anruf ...");
+    const result = await runTestCall(ngrok.publicUrl);
+
+    if (result.signal) {
+      await shutdown(1);
+      return;
+    }
+    await shutdown(result.code);
+    return;
+  }
+
+  logCall("Pruefe System und bereite Begruessung vor - noch kein Anruf ...");
+  const prepareArgs = [
+    ...withoutFlags(argsFromCli, ["--yes", "--prepare-only", "--skip-greeting-prep"]),
+    "--prepare-only",
+  ];
+  const prepareResult = await runTestCall(ngrok.publicUrl, prepareArgs);
+
+  if (prepareResult.signal) {
+    await shutdown(1);
+    return;
+  }
+  if (prepareResult.code !== 0) {
+    await shutdown(prepareResult.code);
+    return;
+  }
+
+  if (needsNodeConfirmation()) {
+    const confirmed = await askForConfirmation();
+    if (!confirmed) {
+      logCall("Abgebrochen - kein Anruf ausgeloest.");
+      await shutdown(0);
+      return;
+    }
+  }
+
+  let callArgs = withoutFlags(argsFromCli, ["--prepare-only", "--skip-greeting-prep"]);
+  callArgs = withFlag(callArgs, "--yes");
+  callArgs = withFlag(callArgs, "--skip-greeting-prep");
+
+  logCall("Starte vorbereiteten Twilio-Testanruf jetzt ...");
+  const result = await runTestCall(ngrok.publicUrl, callArgs);
 
   if (result.signal) {
     await shutdown(1);

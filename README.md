@@ -327,17 +327,27 @@ Wenn dieser manuelle Weg genutzt wird, muss die angezeigte
 `ngrok http` aendert sich die URL (kostenloser Plan) - `.env` entsprechend
 aktualisieren.
 
-Testanruf im dritten Terminal starten:
+Testanruf aus dem Projekt-Root starten:
 
 ```bash
-python -m app.twilio_test_call
+npm run dev
 ```
 
-Wenn das integrierte Terminal den interaktiven `ja`-Prompt abbricht, kann der
-kostenpflichtige Testanruf explizit per Flag bestaetigt werden:
+Der Wrapper startet Backend/ngrok bei Bedarf automatisch, prueft Twilio,
+bereitet die Begruessung vor und fragt erst danach nach `ja`. Nach dieser
+Bestaetigung wird der echte Twilio-Anruf sofort ausgeloest.
+
+Wenn das integrierte Terminal trotzdem den interaktiven Prompt abbricht, kann
+der kostenpflichtige Testanruf explizit per Flag bestaetigt werden:
 
 ```bash
 npm run dev -- --yes
+```
+
+Nur Vorbereitung ohne Anruf:
+
+```bash
+npm run dev -- --prepare-only
 ```
 
 Nur Checks ohne Anruf:
@@ -446,8 +456,9 @@ npm run dev
 ```
 
 Im Projekt-Root ist `npm run dev` bewusst NICHT das Dashboard, sondern der
-bestaetigungspflichtige echte Twilio-Testanruf. Erst wenn im Prompt exakt
-`ja` eingegeben wird, wird ein kostenpflichtiger Anruf ausgeloest.
+bestaetigungspflichtige echte Twilio-Testanruf. Der Wrapper bereitet zuerst
+alles vor; erst wenn im finalen Prompt exakt `ja` eingegeben wird, wird ein
+kostenpflichtiger Anruf ausgeloest.
 
 Dashboard: http://localhost:3000/ (leitet zu `/login`, falls nicht
 angemeldet). Zugangsdaten stehen in der lokalen `.env` des Backends

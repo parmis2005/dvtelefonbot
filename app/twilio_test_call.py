@@ -143,6 +143,18 @@ async def run(args: argparse.Namespace) -> int:
             print("\nChecks erfolgreich. --no-call aktiv: kein Anruf ausgeloest.")
             return 0
 
+        if args.prepare_only:
+            try:
+                print("\nBereite Begruessungs-Audio vor, ohne einen Anruf auszuloesen ...")
+                print("Beim ersten Chatterbox-Lauf kann das dauern. Danach startet der echte Anruf schneller.")
+                greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=None)
+                print(f"  OK ({greeting.bytes} Bytes)")
+                print("Vorbereitung abgeschlossen. Noch wurde kein Twilio-Anruf ausgeloest.")
+                return 0
+            except Exception as exc:
+                print(f"\nFEHLER beim Vorbereiten der Begruessung: {exc}")
+                return 1
+
         if args.yes:
             print("\n--yes gesetzt: Bestaetigung wurde ueber Kommandozeile erteilt.")
         else:
@@ -161,20 +173,23 @@ async def run(args: argparse.Namespace) -> int:
         webhook_url = f"{settings.twilio_public_base_url}/twilio/voice?call_id={call.id}"
         status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
 
-        try:
-            print(f"\nDario-Call-ID angelegt: {call.id}")
-            print("Bereite Begruessungs-Audio vor, bevor Twilio angerufen wird ...")
-            print("Das verhindert Stille direkt nach dem Abheben. Beim ersten Chatterbox-Lauf kann das dauern.")
-            print("Bitte warten und nicht Ctrl+C druecken; das Telefon klingelt erst nach diesem Schritt.")
-            greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
-            print(f"  OK ({greeting.bytes} Bytes)")
-        except Exception as exc:
-            print(f"\nFEHLER beim Vorbereiten der Begruessung: {exc}")
-            await call_service.mark_failed(call.id)
-            return 1
+        print(f"\nDario-Call-ID angelegt: {call.id}")
+        if args.skip_greeting_prep:
+            print("Begruessungs-Audio wurde vorab vorbereitet. Ueberspringe erneute Generierung.")
+        else:
+            try:
+                print("Bereite Begruessungs-Audio vor, bevor Twilio angerufen wird ...")
+                print("Das verhindert Stille direkt nach dem Abheben. Beim ersten Chatterbox-Lauf kann das dauern.")
+                print("Bitte warten und nicht Ctrl+C druecken; das Telefon klingelt erst nach diesem Schritt.")
+                greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
+                print(f"  OK ({greeting.bytes} Bytes)")
+            except Exception as exc:
+                print(f"\nFEHLER beim Vorbereiten der Begruessung: {exc}")
+                await call_service.mark_failed(call.id)
+                return 1
 
         try:
-            print("\nBegruessung ist bereit. Loese Twilio-Anruf jetzt aus ...")
+            print("\nLoese Twilio-Anruf jetzt aus ...")
             call_sid = await asyncio.get_event_loop().run_in_executor(
                 None, provider.start_outbound_call, to_number, webhook_url, status_callback_url
             )
@@ -208,6 +223,16 @@ def parse_args() -> argparse.Namespace:
         "--no-call",
         action="store_true",
         help="Fuehrt nur Checks bis [3/3] aus und loest keinen Anruf aus.",
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Fuehrt Checks aus und bereitet die Begruessung vor, loest aber keinen Anruf aus.",
+    )
+    parser.add_argument(
+        "--skip-greeting-prep",
+        action="store_true",
+        help="Startet den Anruf ohne erneute Begruessungs-Generierung, wenn diese vorab vorbereitet wurde.",
     )
     return parser.parse_args()
 
