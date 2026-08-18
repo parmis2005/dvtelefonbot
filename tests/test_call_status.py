@@ -93,6 +93,21 @@ async def test_ignore_cooldown_bypasses_cooldown_for_manual_test_calls(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_get_by_phone_returns_latest_duplicate(db_session):
+    """Der manuelle Twilio-Testanruf darf nicht crashen, wenn dieselbe
+    Testnummer durch fruehere Dashboard-/Testlaeufe mehrfach existiert."""
+    repo = LeadRepository(db_session)
+    first = await repo.create(unternehmen="Alter Testlead", telefonnummer="+491701234500")
+    second = await repo.create(unternehmen="Neuer Testlead", telefonnummer="+491701234500")
+
+    found = await repo.get_by_phone("+491701234500")
+
+    assert found is not None
+    assert found.id == second.id
+    assert found.id != first.id
+
+
+@pytest.mark.asyncio
 async def test_ignore_cooldown_still_respects_do_not_call(db_session, sample_lead):
     """Der Cooldown-Bypass darf die Do-Not-Call-Sperre NICHT mit aushebeln -
     die gilt ausnahmslos fuer jeden Call-Startpfad (CLAUDE.md Sicherheits-

@@ -43,7 +43,12 @@ class LeadRepository:
         return await self.session.get(Lead, lead_id)
 
     async def get_by_phone(self, phone: str) -> Lead | None:
-        result = await self.session.execute(select(Lead).where(Lead.telefonnummer == phone))
+        result = await self.session.execute(
+            select(Lead)
+            .where(Lead.telefonnummer == phone)
+            .order_by(Lead.updated_at.desc(), Lead.id.desc())
+            .limit(1)
+        )
         return result.scalar_one_or_none()
 
     async def list_all(self, limit: int = 500) -> list[Lead]:
