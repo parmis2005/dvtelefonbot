@@ -148,6 +148,14 @@ class TwilioMediaStreamSession:
                         if timeout_outcome.call_ended:
                             await self._hangup_real_call()
                             break
+                        continue
+                    no_response_outcome = await self.dario.handle_no_response()
+                    if no_response_outcome is not None:
+                        if no_response_outcome.reply_text:
+                            await self._speak(no_response_outcome.reply_text)
+                        if no_response_outcome.call_ended:
+                            await self._hangup_real_call()
+                            break
                     continue
                 outcome = await self.dario.process_utterance(text)
                 if outcome.reply_text:

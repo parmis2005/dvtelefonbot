@@ -263,6 +263,7 @@ async def twilio_media_stream(websocket: WebSocket) -> None:
             stream_sid=stream_sid,
             twilio_call_sid=twilio_call_sid,
             silence_timeout_ms=int(settings.silence_timeout * 1000),
+            max_utterance_seconds=float(settings.silence_timeout),
             wait_timeout_seconds=settings.wait_timeout,
             greeting_audio_path=str(greeting_audio.path),
         )

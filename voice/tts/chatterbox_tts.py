@@ -32,12 +32,21 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import random
+import re
 
 from agent.guardrails import strip_disallowed_audio_artifacts
 from core.logging import get_logger
 from voice.tts.base import TextToSpeechProvider
 
 logger = get_logger(__name__)
+
+
+def _prepare_spoken_text(text: str) -> str:
+    """Macht TTS-Eingaben etwas ruhiger, ohne den gespeicherten Gespraechstext
+    zu veraendern. Wiederholte Satzzeichen wie "???" koennen lokale TTS-Modelle
+    hektisch machen; fuer die Audioausgabe reicht ein einzelnes Satzzeichen."""
+    text = re.sub(r"([!?.,])\1+", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 class ChatterboxUnavailableError(Exception):
@@ -143,14 +152,17 @@ class ChatterboxTTSProvider(TextToSpeechProvider):
         # grobzuegiger, aber wirksamer Korridor gegen abgeschnittene/
         # halluzinierte Ausreisser (siehe Feinabstimmung: normale Werte lagen
         # bei ca. 0.4-0.6s/Wort fuer ruhige Sprache)
-        min_dur = word_count * 0.25
+        # Unterhalb davon klingt die Ausgabe im Telefonpfad hoerbar gehetzt.
+        # Chatterbox ist nicht deterministisch; zu schnelle Seeds werden neu
+        # versucht, bis ein ruhigeres Timing entsteht.
+        min_dur = word_count * 0.42
         max_dur = word_count * 1.1 + 1.5
         return min_dur <= duration <= max_dur
 
     async def synthesize(self, text: str, output_path: str) -> str:
         import torchaudio
 
-        clean_text = strip_disallowed_audio_artifacts(text)
+        clean_text = _prepare_spoken_text(strip_disallowed_audio_artifacts(text))
         if not clean_text:
             raise ValueError("Kein Text zum Sprechen nach Bereinigung uebrig.")
 

@@ -137,10 +137,36 @@ class Dario:
         self.call_active = False
         return TurnOutcome(reply_text=text, call_ended=True)
 
+    async def handle_no_response(self) -> TurnOutcome | None:
+        """Reagiert auf echte Stille ausserhalb des expliziten Wait-Modes.
+
+        Nach der Begruessung darf der Telefonagent nicht dauerhaft schweigen,
+        wenn keine verwertbare Kundensprache erkannt wurde. Gleichzeitig soll
+        er nicht in eine Monolog-Schleife fallen: einmal kurz nachfassen, beim
+        naechsten stillen Fenster sauber beenden.
+        """
+        if not self.call_active or self.context.wait_mode:
+            return None
+
+        self.context.no_response_count += 1
+        if self.context.no_response_count == 1:
+            text = self.engine.responses.no_response_followup()
+            self.context.add_turn("dario", text)
+            return TurnOutcome(reply_text=text)
+
+        self.context.call_result = self.context.call_result or "NO_ANSWER"
+        self.context.transition_to(CallState.GOODBYE)
+        text = self.engine.responses.no_response_goodbye()
+        self.context.add_turn("dario", text)
+        await self._finalize_call()
+        self.call_active = False
+        return TurnOutcome(reply_text=text, call_ended=True)
+
     async def process_utterance(self, user_text: str) -> TurnOutcome:
         if not self.call_active:
             return TurnOutcome(reply_text="", call_ended=True)
 
+        self.context.no_response_count = 0
         result: EngineResult = await self.engine.handle_utterance(self.context, user_text)
         tool_notes: list[str] = []
 

@@ -114,6 +114,33 @@ async def test_check_wait_timeout_noop_when_not_waiting(db_session, sample_lead)
 
 
 @pytest.mark.asyncio
+async def test_no_response_followup_then_ends_call(db_session, sample_lead, tmp_path, monkeypatch):
+    from tests.factories import make_business_config, make_engine
+
+    monkeypatch.setattr(
+        "agent.dario.write_transcript_file",
+        lambda call_id, context: write_transcript_file(call_id, context, transcripts_dir=str(tmp_path)),
+    )
+
+    dario = await _build_dario(db_session, sample_lead, make_business_config(), make_engine())
+    first = await dario.handle_no_response()
+
+    assert first is not None
+    assert first.reply_text == "Hallo, koennen Sie mich hoeren? Es geht nur kurz um Ihren Online-Auftritt."
+    assert first.call_ended is False
+    assert dario.call_active is True
+
+    second = await dario.handle_no_response()
+
+    assert second is not None
+    assert second.call_ended is True
+    assert dario.call_active is False
+    persisted = await CallRepository(db_session).get(dario.call_id)
+    assert persisted.status.value == "COMPLETED"
+    assert persisted.result.value == "NO_ANSWER"
+
+
+@pytest.mark.asyncio
 async def test_check_wait_timeout_asks_once_then_ends_call(db_session, sample_lead, tmp_path, monkeypatch):
     from tests.factories import make_business_config, make_engine
 

@@ -188,6 +188,14 @@ class ResponseBank:
     def still_there(self) -> str:
         return "Sind Sie noch da?"
 
+    def no_response_followup(self) -> str:
+        return (
+            "Hallo, koennen Sie mich hoeren? Es geht nur kurz um Ihren Online-Auftritt."
+        )
+
+    def no_response_goodbye(self) -> str:
+        return "Ich erreiche Sie gerade offenbar nicht richtig. Dann versuche ich es spaeter noch einmal. Auf Wiederhoeren."
+
     # --- Preise (Abschnitt 31-34) ---
 
     def pricing_website(self) -> str:

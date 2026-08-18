@@ -65,6 +65,7 @@ class ConversationContext:
     wait_mode: bool = False
     wait_started_at: datetime | None = None
     still_there_asked: bool = False
+    no_response_count: int = 0
 
     preferred_contact: str | None = None  # "EMAIL" | "WHATSAPP"
     contact_value_pending: str | None = None  # noch nicht bestaetigter Wert
