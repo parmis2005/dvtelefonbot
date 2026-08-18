@@ -326,7 +326,7 @@ async function startBackend(publicUrl) {
 
 function runTestCall(publicUrl) {
   return new Promise((resolve) => {
-    const childArgs = ["-m", "app.twilio_test_call", ...argsFromCli];
+    const childArgs = ["-u", "-m", "app.twilio_test_call", ...argsFromCli];
     const child = spawn(pythonBin, childArgs, {
       cwd: ROOT,
       env: { ...process.env, TWILIO_PUBLIC_BASE_URL: publicUrl },

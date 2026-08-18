@@ -162,7 +162,10 @@ async def run(args: argparse.Namespace) -> int:
         status_callback_url = f"{settings.twilio_public_base_url}/twilio/status?call_id={call.id}"
 
         try:
-            print("\nBereite Begruessungs-Audio vor ...")
+            print(f"\nDario-Call-ID angelegt: {call.id}")
+            print("Bereite Begruessungs-Audio vor, bevor Twilio angerufen wird ...")
+            print("Das verhindert Stille direkt nach dem Abheben. Beim ersten Chatterbox-Lauf kann das dauern.")
+            print("Bitte warten und nicht Ctrl+C druecken; das Telefon klingelt erst nach diesem Schritt.")
             greeting = await prepare_greeting_audio(session, lead_id=lead.id, call_id=call.id)
             print(f"  OK ({greeting.bytes} Bytes)")
         except Exception as exc:
@@ -171,6 +174,7 @@ async def run(args: argparse.Namespace) -> int:
             return 1
 
         try:
+            print("\nBegruessung ist bereit. Loese Twilio-Anruf jetzt aus ...")
             call_sid = await asyncio.get_event_loop().run_in_executor(
                 None, provider.start_outbound_call, to_number, webhook_url, status_callback_url
             )
@@ -183,6 +187,7 @@ async def run(args: argparse.Namespace) -> int:
         print(f"\nAnruf ausgeloest. Twilio Call-SID: {call_sid}")
         print("[CALL_TRIGGERED]")
         print(f"Dario-Call-ID (Dashboard/DB): {call.id}")
+        print("Das Zieltelefon sollte jetzt klingeln.")
         print("Sobald abgenommen wird, verbindet Twilio den Anruf mit Darios Media-Stream-WebSocket.")
         return 2
 
