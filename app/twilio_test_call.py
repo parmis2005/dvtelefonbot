@@ -146,7 +146,12 @@ async def run(args: argparse.Namespace) -> int:
         if args.yes:
             print("\n--yes gesetzt: Bestaetigung wurde ueber Kommandozeile erteilt.")
         else:
-            answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
+            try:
+                answer = input("\nJetzt wirklich anrufen? Tippe 'ja' zum Bestaetigen: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAbgebrochen - kein Anruf ausgeloest.")
+                print("Wenn dein Terminal den Prompt abbricht: npm run dev -- --yes")
+                return 0
             if answer != "ja":
                 print("Abgebrochen - kein Anruf ausgeloest.")
                 print("Wenn dein Terminal den Prompt abbricht: npm run dev -- --yes")
@@ -204,7 +209,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    exit_code = asyncio.run(run(args))
+    try:
+        exit_code = asyncio.run(run(args))
+    except KeyboardInterrupt:
+        print("\nAbgebrochen - kein Anruf ausgeloest.")
+        print("Wenn dein Terminal den Prompt abbricht: npm run dev -- --yes")
+        exit_code = 0
     sys.exit(exit_code)
 
 
