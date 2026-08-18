@@ -8,6 +8,7 @@ kostenpflichtiger Anruf ausgeloest werden.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import ClassVar
 
 import pytest
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 
 import app.main as app_main
 import services.campaign_service as campaign_service_module
+import services.dashboard_state_export as dashboard_state_export
 from core.config import get_settings
 from database.database import get_session_factory, reset_engine_for_tests
 from database.repository import CallRepository, CampaignRepository
@@ -112,6 +114,20 @@ def test_dashboard_routes_require_login(client):
     assert client.get("/api/voices").status_code == 401
     assert client.get("/api/do-not-call").status_code == 401
     assert client.get("/api/settings").status_code == 401
+
+
+def test_dashboard_update_exports_local_state(client, tmp_path, monkeypatch):
+    export_dir = tmp_path / "dashboard_state"
+    monkeypatch.setattr(dashboard_state_export, "EXPORT_DIR", export_dir)
+    _login(client)
+
+    response = client.put("/api/settings", json={"values": {"agent_name": "Dario Export"}})
+
+    assert response.status_code == 200, response.text
+    settings = json.loads((export_dir / "settings.json").read_text(encoding="utf-8"))
+    manifest = json.loads((export_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert settings["values"]["agent_name"] == "Dario Export"
+    assert manifest["reason"] == "settings_updated"
 
 
 def test_campaign_create_start_launches_real_calls(client):

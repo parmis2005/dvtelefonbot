@@ -21,6 +21,7 @@ from database.models import Lead
 from database.repository import LeadRepository, PromptVersionRepository
 from services.call_service import CallService
 from services.summary_service import build_summary
+from services.dashboard_state_export import export_dashboard_state_safely
 from services.transcript_service import persist_transcript, write_transcript_file
 from tools.call_tools import ToolExecutor
 
@@ -185,6 +186,7 @@ class Dario:
             from database.repository import CallRepository
 
             await CallRepository(self.session).update(self.call_id, summary=summary)
+            await export_dashboard_state_safely(self.session, reason="call_finalized")
 
         write_transcript_file(self.call_id or 0, self.context)
         logger.info("Call beendet, Ergebnis: %s", self.context.call_result)

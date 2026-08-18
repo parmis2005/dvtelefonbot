@@ -29,6 +29,10 @@ transcripts/*.txt
 !logs/.gitkeep
 !transcripts/.gitkeep
 
+# local dashboard mirror for VS Code - contains contacts/calls/transcripts
+dashboard_state/*
+!dashboard_state/README.md
+
 # models (large binaries, downloaded by setup script)
 models/
 *.gguf

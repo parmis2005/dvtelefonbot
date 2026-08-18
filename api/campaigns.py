@@ -20,6 +20,7 @@ from database.database import get_db_session
 from database.models import Campaign
 from database.repository import CallRepository, CampaignRepository, LeadRepository
 from services.campaign_service import get_campaign_manager
+from services.dashboard_state_export import export_dashboard_state_safely
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"], dependencies=[Depends(require_auth)])
 
@@ -97,6 +98,7 @@ async def create_campaign(payload: CampaignCreate, session: DbSession) -> Campai
         lead_ids_json=json.dumps(payload.lead_ids),
         max_concurrent=max_concurrent,
     )
+    await export_dashboard_state_safely(session, reason="campaign_created")
     return await CampaignOut.from_model(campaign, session)
 
 
@@ -121,6 +123,7 @@ async def start_campaign(campaign_id: int, session: DbSession) -> CampaignOut:
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     campaign = await _refetch(session, campaign_id)
+    await export_dashboard_state_safely(session, reason="campaign_started")
     return await CampaignOut.from_model(campaign, session)
 
 
@@ -129,6 +132,7 @@ async def pause_campaign(campaign_id: int, session: DbSession) -> CampaignOut:
     await _refetch(session, campaign_id)  # 404, falls unbekannt
     await get_campaign_manager().pause(campaign_id)
     campaign = await _refetch(session, campaign_id)
+    await export_dashboard_state_safely(session, reason="campaign_paused")
     return await CampaignOut.from_model(campaign, session)
 
 
@@ -139,6 +143,7 @@ async def resume_campaign(campaign_id: int, session: DbSession) -> CampaignOut:
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     campaign = await _refetch(session, campaign_id)
+    await export_dashboard_state_safely(session, reason="campaign_resumed")
     return await CampaignOut.from_model(campaign, session)
 
 
@@ -147,4 +152,5 @@ async def stop_campaign(campaign_id: int, session: DbSession) -> CampaignOut:
     await _refetch(session, campaign_id)  # 404, falls unbekannt
     await get_campaign_manager().stop(campaign_id)
     campaign = await _refetch(session, campaign_id)
+    await export_dashboard_state_safely(session, reason="campaign_stopped")
     return await CampaignOut.from_model(campaign, session)

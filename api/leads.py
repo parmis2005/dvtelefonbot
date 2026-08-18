@@ -14,6 +14,7 @@ from database.database import get_db_session
 from database.models import Lead, LeadStatus, PreferredContact
 from database.repository import CallRepository, LeadRepository
 from services.csv_import import build_preview
+from services.dashboard_state_export import export_dashboard_state_safely
 from services.lead_service import LeadService, LeadValidationError
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], dependencies=[Depends(require_auth)])
@@ -105,7 +106,9 @@ async def get_lead(lead_id: int, session: DbSession) -> dict:
 @router.post("", response_model=LeadOut, status_code=201)
 async def create_lead(payload: LeadCreate, session: DbSession) -> Lead:
     try:
-        return await LeadService(session).create_lead(**payload.model_dump())
+        lead = await LeadService(session).create_lead(**payload.model_dump())
+        await export_dashboard_state_safely(session, reason="lead_created")
+        return lead
     except LeadValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -120,6 +123,7 @@ async def update_lead(lead_id: int, payload: LeadUpdate, session: DbSession) -> 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if lead is None:
         raise HTTPException(status_code=404, detail="Lead nicht gefunden")
+    await export_dashboard_state_safely(session, reason="lead_updated")
     return lead
 
 
@@ -128,6 +132,7 @@ async def delete_lead(lead_id: int, session: DbSession) -> None:
     deleted = await LeadRepository(session).delete(lead_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Lead nicht gefunden")
+    await export_dashboard_state_safely(session, reason="lead_deleted")
 
 
 @router.post("/import/preview")
@@ -144,6 +149,7 @@ async def preview_csv_import(file: UploadFile) -> dict:
 @router.post("/import/confirm")
 async def confirm_csv_import(rows: list[dict], session: DbSession) -> dict:
     created, errors = await LeadService(session).import_from_rows(rows)
+    await export_dashboard_state_safely(session, reason="leads_imported")
     return {
         "created_count": len(created),
         "created_ids": [lead.id for lead in created],

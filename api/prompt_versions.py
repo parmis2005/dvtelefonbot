@@ -19,6 +19,7 @@ from core.auth import require_auth
 from database.database import get_db_session
 from database.models import PromptVersion
 from database.repository import PromptVersionRepository
+from services.dashboard_state_export import export_dashboard_state_safely
 
 router = APIRouter(
     prefix="/api/prompt-versions", tags=["prompt-versions"], dependencies=[Depends(require_auth)]
@@ -92,6 +93,7 @@ async def create_prompt_version(payload: PromptVersionCreate, session: DbSession
     repo = PromptVersionRepository(session)
     await _ensure_seeded(repo)
     version = await repo.create_version(payload.content, label=payload.label, activate=payload.activate)
+    await export_dashboard_state_safely(session, reason="prompt_version_created")
     return PromptVersionOut.from_model(version)
 
 
@@ -104,4 +106,5 @@ async def activate_prompt_version(version_id: int, session: DbSession) -> Prompt
     version = await repo.activate(version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Prompt-Version nicht gefunden")
+    await export_dashboard_state_safely(session, reason="prompt_version_activated")
     return PromptVersionOut.from_model(version)

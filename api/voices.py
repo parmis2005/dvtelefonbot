@@ -24,6 +24,7 @@ from core.config import get_settings
 from database.database import get_db_session
 from database.models import VoiceProfile
 from database.repository import VoiceProfileRepository
+from services.dashboard_state_export import export_dashboard_state_safely
 
 router = APIRouter(prefix="/api/voices", tags=["voices"], dependencies=[Depends(require_auth)])
 
@@ -131,6 +132,7 @@ async def upload_voice(session: DbSession, name: str, file: UploadFile) -> Voice
         temperature=settings.chatterbox_temperature,
         activate=False,
     )
+    await export_dashboard_state_safely(session, reason="voice_uploaded")
     return VoiceProfileOut.from_model(profile)
 
 
@@ -139,6 +141,7 @@ async def rename_voice(voice_id: int, payload: VoiceProfileRename, session: DbSe
     profile = await VoiceProfileRepository(session).rename(voice_id, payload.name)
     if profile is None:
         raise HTTPException(status_code=404, detail="Stimme nicht gefunden")
+    await export_dashboard_state_safely(session, reason="voice_renamed")
     return VoiceProfileOut.from_model(profile)
 
 
@@ -147,6 +150,7 @@ async def activate_voice(voice_id: int, session: DbSession) -> VoiceProfileOut:
     profile = await VoiceProfileRepository(session).activate(voice_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Stimme nicht gefunden")
+    await export_dashboard_state_safely(session, reason="voice_activated")
     return VoiceProfileOut.from_model(profile)
 
 
@@ -162,6 +166,7 @@ async def delete_voice(voice_id: int, session: DbSession) -> None:
     await repo.delete(voice_id)
     if file_path and Path(file_path).exists() and Path(file_path).is_relative_to(UPLOAD_DIR):
         Path(file_path).unlink(missing_ok=True)
+    await export_dashboard_state_safely(session, reason="voice_deleted")
 
 
 @router.post("/{voice_id}/test")

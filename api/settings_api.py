@@ -24,6 +24,7 @@ from core.auth import require_auth
 from core.config import get_settings
 from database.database import get_db_session
 from database.repository import AppSettingRepository
+from services.dashboard_state_export import export_dashboard_state_safely
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_auth)])
 
@@ -92,6 +93,7 @@ async def update_dashboard_settings(payload: SettingsUpdate, session: DbSession)
     repo = AppSettingRepository(session)
     to_store = {k: v for k, v in payload.values.items() if k in _EDITABLE_KEYS}
     await repo.set_many(to_store)
+    await export_dashboard_state_safely(session, reason="settings_updated")
     return SettingsOut(values=await _merged_settings(session))
 
 
