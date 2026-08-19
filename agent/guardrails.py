@@ -134,6 +134,23 @@ _FILLER_PATTERNS = [
     r"^\s*(hm+|ähm+|äh+|uhm+|hmm+)[.,!]?\s*",
 ]
 
+_PROMPT_LEAK_MARKERS = [
+    "identität und rolle",
+    "identitaet und rolle",
+    "verfügbare variablen",
+    "verfuegbare variablen",
+    "wahrheitsregeln",
+    "hauptziel des telefonats",
+    "gesprächsstil",
+    "gespraechsstil",
+    "oberste regeln",
+    "beginne jeden ausgehenden anruf",
+    "deine aufgaben sind",
+    "dein name ist dario",
+    "systemprompt",
+    "prompt-version",
+]
+
 
 def strip_disallowed_audio_artifacts(text: str) -> str:
     """Entfernt Seufzer/Fuelllaute/Regieanweisungen aus (insbesondere LLM-)Text,
@@ -143,3 +160,16 @@ def strip_disallowed_audio_artifacts(text: str) -> str:
     for pattern in _FILLER_PATTERNS:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def looks_like_prompt_leak(text: str) -> bool:
+    """Erkennt Prompt-/Instruktionsinhalt, der niemals gesprochen werden darf."""
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if not normalized:
+        return False
+    if "{{" in normalized or "}}" in normalized:
+        return True
+    marker_hits = sum(1 for marker in _PROMPT_LEAK_MARKERS if marker in normalized)
+    if marker_hits >= 1 and len(normalized) > 180:
+        return True
+    return normalized.startswith("#") and ("dario" in normalized or "telefonagent" in normalized)

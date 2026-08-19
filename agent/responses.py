@@ -62,20 +62,17 @@ class ResponseBank:
     def topic_explanation_after_opening(self, lead: LeadData) -> str:
         if can_claim_online_auftritt_geprueft(lead) and can_claim_entwurf_vorhanden(lead):
             return (
-                "Es geht kurz um Ihren Webseiten- und Online-Auftritt. Wir haben ihn uns "
-                "angesehen und bereits einen unverbindlichen Entwurf vorbereitet. Darf ich "
-                "Ihnen den einmal zuschicken?"
+                "Es geht kurz um Ihren Online-Auftritt. Wir haben einen unverbindlichen "
+                "Entwurf vorbereitet. Darf ich Ihnen den einmal zuschicken?"
             )
         if can_claim_entwurf_vorhanden(lead):
             return (
-                "Es geht kurz um Ihren Webseiten- und Online-Auftritt. Wir haben bereits "
-                "einen unverbindlichen Entwurf vorbereitet, damit Sie direkt eine Richtung "
-                "sehen. Darf ich Ihnen den einmal zuschicken?"
+                "Es geht kurz um Ihren Online-Auftritt. Wir haben einen unverbindlichen "
+                "Entwurf vorbereitet. Darf ich Ihnen den einmal zuschicken?"
             )
         return (
             "Es geht kurz um Ihren Online-Auftritt. Wir haetten dazu einen konkreten "
-            "Vorschlag, wie dieser moderner und uebersichtlicher wirken koennte. Darf ich "
-            "Ihnen das kurz erklaeren?"
+            "Vorschlag. Darf ich Ihnen das kurz erklaeren?"
         )
 
     # --- Person nicht da (Abschnitt 15) ---

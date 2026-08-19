@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent.guardrails import looks_like_prompt_leak
 from core.auth import require_auth
 from core.config import get_settings
 from database.database import get_db_session
@@ -37,6 +38,7 @@ SAMPLE_DIR = BASE_DIR / "models" / "voice_reference" / "samples"
 DEFAULT_TEST_TEXT = (
     "Guten Tag, hier ist Dario von Digital Vision. Ich melde mich kurz zu Ihrem Online-Auftritt."
 )
+MAX_VOICE_TEST_TEXT_CHARS = 280
 
 
 class VoiceProfileOut(BaseModel):
@@ -197,10 +199,25 @@ async def test_voice(voice_id: int, session: DbSession, text: str | None = None)
             detail="Chatterbox nicht verfuegbar (Paket fehlt oder Referenzdatei nicht gefunden).",
         )
 
+    spoken_text = (text or DEFAULT_TEST_TEXT).strip()
+    if len(spoken_text) > MAX_VOICE_TEST_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Der Stimmtest-Text ist zu lang. Bitte maximal "
+                f"{MAX_VOICE_TEST_TEXT_CHARS} Zeichen verwenden."
+            ),
+        )
+    if looks_like_prompt_leak(spoken_text):
+        raise HTTPException(
+            status_code=422,
+            detail="Der Stimmtest darf keinen Systemprompt oder Prompt-Text sprechen.",
+        )
+
     SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
     out_path = SAMPLE_DIR / f"test_{voice_id}.wav"
     try:
-        await provider.synthesize(text or DEFAULT_TEST_TEXT, str(out_path))
+        await provider.synthesize(spoken_text, str(out_path))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Sprachsynthese fehlgeschlagen: {exc}") from exc
 

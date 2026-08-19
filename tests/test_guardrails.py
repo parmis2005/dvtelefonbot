@@ -14,6 +14,7 @@ from agent.guardrails import (
     guard_callback,
     guard_send_email,
     is_valid_email,
+    looks_like_prompt_leak,
 )
 from agent.responses import ResponseBank
 from core.config import BusinessConfig
@@ -114,3 +115,13 @@ def test_callback_without_calendar_never_confirms_fixed_booking():
     text = bank.callback_without_calendar()
     assert "fest gebucht" not in text
     assert "Bestaetigung" in text
+
+
+def test_prompt_leak_detection_blocks_instruction_documents():
+    leaked = (
+        "IDENTITÄT UND ROLLE\n\n"
+        "Dein Name ist Dario. Deine Aufgaben sind: Interesse wecken und "
+        "Variablen wie {{unternehmen}} verwenden."
+    )
+    assert looks_like_prompt_leak(leaked) is True
+    assert looks_like_prompt_leak("Es geht kurz um Ihren Online-Auftritt.") is False

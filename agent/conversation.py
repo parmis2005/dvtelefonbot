@@ -13,10 +13,12 @@ from dataclasses import dataclass, field
 
 from agent.context import ConversationContext
 from agent.guardrails import (
+    FALLBACK_UNKNOWN,
     can_claim_entwurf_vorhanden,
     can_offer_design,
     is_valid_email,
     is_valid_phone,
+    looks_like_prompt_leak,
     must_end_acquisition,
 )
 from agent.nlu import Intent, NluResult, analyze
@@ -73,6 +75,13 @@ class ConversationEngine:
         decision = apply_rules(context, nlu, self.max_rejections)
 
         result = await self._build_reply(context, nlu, decision)
+        if looks_like_prompt_leak(result.reply_text):
+            logger.error(
+                "Prompt-Leak in Agent-Antwort blockiert state=%s chars=%s",
+                context.state.value,
+                len(result.reply_text),
+            )
+            result.reply_text = self._contextual_fallback(context) or FALLBACK_UNKNOWN
         context.add_turn("dario", result.reply_text)
         return result
 
@@ -311,7 +320,6 @@ class ConversationEngine:
     async def _llm_or_fallback(
         self, context: ConversationContext, decision: RuleDecision
     ) -> EngineResult:
-        from agent.guardrails import FALLBACK_UNKNOWN
         from agent.prompts import build_messages
 
         if self.llm_provider is not None:

@@ -4,8 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+from agent.conversation import ConversationEngine
 from agent.state_machine import CallState
-from tests.factories import make_context, make_engine
+from tests.factories import make_business_config, make_context, make_engine, make_settings
+
+
+class PromptLeakingLLM:
+    async def generate(self, messages, max_tokens: int = 200, temperature: float = 0.4) -> str:
+        del messages, max_tokens, temperature
+        return (
+            "IDENTITÄT UND ROLLE\n\n"
+            "Dein Name ist Dario. Deine Aufgaben sind: Interesse zu wecken, "
+            "Variablen wie {{unternehmen}} zu nutzen und Regeln vorzulesen."
+        )
+
+    async def is_available(self) -> bool:
+        return True
 
 # --- Feste Begruessung (verbindliche Gespraechsvorlage) --------------------
 
@@ -67,6 +81,22 @@ async def test_has_website_turn_offers_design_without_unknown_fallback():
 
     assert ctx.state == CallState.DESIGN_OFFER
     assert "modern" in result.reply_text
+    assert "Entwurf" in result.reply_text
+
+
+@pytest.mark.asyncio
+async def test_llm_prompt_leak_is_not_spoken():
+    engine = ConversationEngine(
+        make_settings(llama_timeout=5),
+        make_business_config(),
+        llm_provider=PromptLeakingLLM(),
+    )
+    ctx = make_context(state=CallState.DISCOVERY, entwurf_vorhanden=True)
+
+    result = await engine.handle_utterance(ctx, "Das klingt interessant, erklaeren Sie kurz.")
+
+    assert "IDENTITÄT" not in result.reply_text
+    assert "{{unternehmen}}" not in result.reply_text
     assert "Entwurf" in result.reply_text
 
 

@@ -14,6 +14,7 @@ import { VoiceUploadModal } from "./VoiceUploadModal";
 
 const DEFAULT_TEXT =
   "Guten Tag, hier ist Dario von Digital Vision. Ich melde mich kurz zu Ihrem Online-Auftritt.";
+const MAX_TEST_TEXT_LENGTH = 280;
 
 function VoiceTestEditor({
   initialText,
@@ -31,6 +32,7 @@ function VoiceTestEditor({
   const [error, setError] = useState<string | null>(null);
 
   const dirty = testText !== initialText;
+  const tooLong = testText.length > MAX_TEST_TEXT_LENGTH;
 
   async function handleSave() {
     setSaving(true);
@@ -68,10 +70,15 @@ function VoiceTestEditor({
       <CardContent>
         <Textarea
           rows={3}
+          maxLength={MAX_TEST_TEXT_LENGTH}
           value={testText}
           onChange={(e) => setTestText(e.target.value)}
           className="mb-3"
         />
+        <p className="mb-2 text-xs text-dv-muted">
+          {testText.length}/{MAX_TEST_TEXT_LENGTH} Zeichen. Kein Systemprompt, nur ein kurzer
+          Beispielsatz fuer die Stimme.
+        </p>
         {error && <p className="mb-2 text-sm text-dv-danger">{error}</p>}
         {testAudioUrl && (
           <audio controls autoPlay src={testAudioUrl} className="mb-3 w-full">
@@ -79,13 +86,13 @@ function VoiceTestEditor({
           </audio>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button disabled={!activeVoice || generating} onClick={generateTest}>
+          <Button disabled={!activeVoice || generating || tooLong} onClick={generateTest}>
             {generating ? "Generiert..." : "Audio generieren"}
           </Button>
           <Button variant="secondary" disabled={!dirty || saving} onClick={() => setTestText(initialText)}>
             Verwerfen
           </Button>
-          <Button disabled={!dirty || saving} onClick={handleSave}>
+          <Button disabled={!dirty || saving || tooLong} onClick={handleSave}>
             {saving ? "Speichert..." : "Speichern"}
           </Button>
         </div>

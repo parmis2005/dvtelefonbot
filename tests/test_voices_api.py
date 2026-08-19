@@ -146,3 +146,28 @@ def test_voice_test_endpoint_returns_audio(client):
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
     assert len(response.content) > 0
+
+
+def test_voice_test_rejects_prompt_text(client):
+    voices = client.get("/api/voices").json()
+    voice_id = voices[0]["id"]
+    prompt_text = (
+        "IDENTITÄT UND ROLLE\n\n"
+        "Dein Name ist Dario. Deine Aufgaben sind: Interesse wecken und "
+        "{{unternehmen}} natuerlich im Gespraech nutzen."
+    )
+
+    response = client.post(f"/api/voices/{voice_id}/test", params={"text": prompt_text})
+
+    assert response.status_code == 422
+    assert "Systemprompt" in response.json()["detail"]
+
+
+def test_voice_test_rejects_too_long_text(client):
+    voices = client.get("/api/voices").json()
+    voice_id = voices[0]["id"]
+
+    response = client.post(f"/api/voices/{voice_id}/test", params={"text": "A" * 281})
+
+    assert response.status_code == 422
+    assert "zu lang" in response.json()["detail"]
