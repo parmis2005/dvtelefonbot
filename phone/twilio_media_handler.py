@@ -49,6 +49,7 @@ FRAME_MS = 20  # Twilio liefert/erwartet 20ms-Frames
 FRAME_SAMPLES_8K = TWILIO_SAMPLE_RATE * FRAME_MS // 1000  # 160 Samples = 160 Bytes mu-law
 VAD_FRAME_MS = 30  # webrtcvad erlaubt nur 10/20/30ms
 MIN_STT_SPEECH_MS = 120  # kurze Antworten wie "ja" duerfen nicht weggefiltert werden
+MAX_BARGE_IN_PREROLL_CHUNKS = 25  # ca. 500ms Twilio-Audio vor erkannter Unterbrechung
 
 
 class MediaSessionState(str, enum.Enum):
@@ -118,6 +119,12 @@ class TwilioMediaStreamSession:
         self._state = MediaSessionState.INITIALIZING
         self._playback_started_at: float | None = None
         self._barge_in_speech_ms = 0
+        self._barge_in_preroll: list[np.ndarray] = []
+        self._barge_in_capture_active = False
+        self._barge_in_capture_buffer: list[np.ndarray] = []
+        self._barge_in_capture_speech_ms = 0
+        self._pending_barge_in_audio: list[np.ndarray] = []
+        self._pending_barge_in_speech_ms = 0
         self._last_speech_active = False
         self._speech_started_at: float | None = None
         self._speech_ended_at: float | None = None
@@ -324,7 +331,16 @@ class TwilioMediaStreamSession:
 
                 if event == "media":
                     pcm_8k = mulaw_to_pcm16(base64.b64decode(msg["media"]["payload"]))
+                    if self._speaking and self._barge_in_enabled:
+                        self._track_barge_in_preroll(pcm_8k)
                     endpoint_hit = self._process_vad_frames(pcm_8k)
+                    if (
+                        self._speaking
+                        and self._barge_in_enabled
+                        and self._barge_in_event.is_set()
+                        and not self._barge_in_capture_active
+                    ):
+                        self._start_barge_in_capture()
                     if self._listening:
                         self._current_utterance.append(pcm_8k)
                         if endpoint_hit:
@@ -401,6 +417,9 @@ class TwilioMediaStreamSession:
                 else:
                     self._barge_in_speech_ms = 0
 
+                if self._barge_in_capture_active and is_relevant_speech:
+                    self._barge_in_capture_speech_ms += VAD_FRAME_MS
+
                 if self._barge_in_speech_ms >= 120 and not self._barge_in_event.is_set():
                     logger.info(
                         "[BARGE_IN] detected call_id=%s streamSid=%s speech_ms=%s rms=%.0f playback_ms=%.0f",
@@ -416,6 +435,51 @@ class TwilioMediaStreamSession:
 
         self._vad_carry = combined[n_frames * frame_len :]
         return endpoint_hit
+
+    def _track_barge_in_preroll(self, pcm_8k: np.ndarray) -> None:
+        frame = pcm_8k.copy()
+        self._barge_in_preroll.append(frame)
+        if len(self._barge_in_preroll) > MAX_BARGE_IN_PREROLL_CHUNKS:
+            self._barge_in_preroll = self._barge_in_preroll[-MAX_BARGE_IN_PREROLL_CHUNKS:]
+        if self._barge_in_capture_active:
+            self._barge_in_capture_buffer.append(frame)
+
+    def _start_barge_in_capture(self) -> None:
+        self._barge_in_capture_active = True
+        self._barge_in_capture_buffer = [chunk.copy() for chunk in self._barge_in_preroll]
+        self._barge_in_capture_speech_ms = max(
+            self._barge_in_capture_speech_ms,
+            self._barge_in_speech_ms,
+        )
+        logger.info(
+            "[BARGE_IN] capture started call_id=%s streamSid=%s preroll_chunks=%s speech_ms=%s",
+            self.call_id,
+            self.stream_sid,
+            len(self._barge_in_capture_buffer),
+            self._barge_in_capture_speech_ms,
+        )
+
+    def _commit_barge_in_capture(self) -> None:
+        if not self._barge_in_capture_buffer:
+            return
+        self._pending_barge_in_audio = [chunk.copy() for chunk in self._barge_in_capture_buffer]
+        self._pending_barge_in_speech_ms = max(
+            self._barge_in_capture_speech_ms,
+            self._barge_in_speech_ms,
+        )
+        logger.info(
+            "[BARGE_IN] captured audio for next STT call_id=%s streamSid=%s chunks=%s speech_ms=%s",
+            self.call_id,
+            self.stream_sid,
+            len(self._pending_barge_in_audio),
+            self._pending_barge_in_speech_ms,
+        )
+
+    def _reset_barge_in_capture(self) -> None:
+        self._barge_in_preroll = []
+        self._barge_in_capture_active = False
+        self._barge_in_capture_buffer = []
+        self._barge_in_capture_speech_ms = 0
 
     # --- Sprechen (TTS -> mu-law -> WebSocket) ---------------------------
 
@@ -541,6 +605,12 @@ class TwilioMediaStreamSession:
         frame_seconds = FRAME_MS / 1000
         chunks_sent = 0
 
+        if allow_barge_in:
+            self._reset_barge_in_capture()
+        else:
+            self._barge_in_preroll = []
+            self._pending_barge_in_audio = []
+            self._pending_barge_in_speech_ms = 0
         if not allow_barge_in:
             self._barge_in_event.clear()
         self._barge_in_speech_ms = 0
@@ -596,10 +666,12 @@ class TwilioMediaStreamSession:
                 if delay > 0:
                     await asyncio.sleep(delay)
         finally:
+            self._commit_barge_in_capture()
             self._speaking = False
             self._barge_in_enabled = False
             self._barge_in_event.clear()
             self._barge_in_speech_ms = 0
+            self._reset_barge_in_capture()
             self._playback_started_at = None
             logger.info(
                 "[AUDIO] chunks sent=%s call_id=%s streamSid=%s",
@@ -637,18 +709,30 @@ class TwilioMediaStreamSession:
     # --- Zuhoeren (aus der vom Empfangs-Task befuellten Warteschlange) ----
 
     async def _listen_for_utterance(self) -> str:
-        self._current_utterance = []
+        pending_barge_in_audio = self._pending_barge_in_audio
+        pending_barge_in_speech_ms = self._pending_barge_in_speech_ms
+        self._pending_barge_in_audio = []
+        self._pending_barge_in_speech_ms = 0
+        self._current_utterance = [chunk.copy() for chunk in pending_barge_in_audio]
         self._endpoint.reset()
         self._utterance_ready.clear()
-        self._last_listen_end_reason = "timeout"
+        self._last_listen_end_reason = "barge_in" if pending_barge_in_audio else "timeout"
         self._last_speech_active = False
         self._speech_started_at = None
         self._speech_ended_at = None
-        self._listen_speech_ms = 0
+        self._listen_speech_ms = pending_barge_in_speech_ms
         self._listening = True
         self._set_state(
             MediaSessionState.WAITING if self.dario.context.wait_mode else MediaSessionState.LISTENING
         )
+        if pending_barge_in_audio:
+            logger.info(
+                "[BARGE_IN] replaying captured audio into listen window call_id=%s streamSid=%s chunks=%s speech_ms=%s",
+                self.call_id,
+                self.stream_sid,
+                len(pending_barge_in_audio),
+                pending_barge_in_speech_ms,
+            )
         logger.info(
             "[LISTEN] started call_id=%s streamSid=%s max_seconds=%.1f",
             self.call_id,

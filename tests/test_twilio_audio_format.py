@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -28,6 +29,7 @@ from phone.twilio_media_handler import (
 )
 from tests.test_twilio_media_stream_e2e import FakeTwilioWebSocket
 from voice.codecs import mulaw_to_pcm16, pcm16_to_mulaw, resample_pcm16
+from voice.stt.base import TranscriptionResult
 
 # --- reine Codec-Korrektheit (Ground Truth: Pythons eingebautes audioop) ---
 
@@ -128,6 +130,18 @@ def _make_session(ws: FakeTwilioWebSocket, stream_sid: str) -> TwilioMediaStream
         twilio_provider=None,
         stream_sid=stream_sid,
     )
+
+
+class RecordingSTT:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def transcribe(self, audio_path: str) -> TranscriptionResult:
+        self.calls.append(audio_path)
+        return TranscriptionResult(text="Unterbrechung erkannt")
+
+    async def is_available(self) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -233,6 +247,25 @@ def test_barge_in_requires_relevant_speech_not_only_vad(monkeypatch):
     for _ in range(8):
         session._process_vad_frames(loud)
     assert session._barge_in_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_captured_barge_in_audio_is_transcribed_in_next_listen_turn():
+    ws = FakeTwilioWebSocket()
+    session = _make_session(ws, "MZcapturedbargein")
+    session.dario = SimpleNamespace(context=SimpleNamespace(wait_mode=False))
+    stt = RecordingSTT()
+    session.stt = stt
+    session.max_utterance_seconds = 0.01
+    session.require_vad_speech_for_stt = True
+    loud = np.full(FRAME_SAMPLES_8K, 12000, dtype=np.int16)
+    session._pending_barge_in_audio = [loud.copy() for _ in range(8)]
+    session._pending_barge_in_speech_ms = 240
+
+    text = await session._listen_for_utterance()
+
+    assert text == "Unterbrechung erkannt"
+    assert len(stt.calls) == 1
 
 
 @pytest.mark.asyncio
