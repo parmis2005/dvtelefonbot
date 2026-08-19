@@ -42,6 +42,11 @@ async def prepare_initial_response_audio(
 
     prepared: list[PreparedResponseAudio] = []
     seen_texts: set[str] = set()
+    # Keep this list intentionally small. Chatterbox is CPU-bound and each
+    # uncached phrase can take many seconds; `npm run dev` must not block for
+    # a long catalogue of possible later turns before the real test call can
+    # start. These are only the high-probability first-turn paths after the
+    # greeting.
     sample_dialogues = [
         ("Ja, habe ich.",),
         ("Ja, ich habe kurz Zeit.",),
@@ -49,17 +54,6 @@ async def prepare_initial_response_audio(
         ("Ja, worum geht es?",),
         ("Worum geht es?",),
         ("Ja, worum geht es?", "Ja, gerne."),
-        ("Ja, kein Problem.", "Wir haben eine Webseite."),
-        ("Ja, kein Problem.", "Wir haben keine Webseite."),
-        ("Ja, kein Problem.", "Wir sind damit zufrieden."),
-        ("Ja, kein Problem.", "Schicken Sie mir das per E-Mail."),
-        ("Ja, kein Problem.", "Per WhatsApp bitte."),
-        ("Einen Moment bitte.",),
-        ("Ich habe gerade keine Zeit.",),
-        ("Wir haben kein Interesse.",),
-        ("Was kostet das?",),
-        ("Sind Sie eine KI?",),
-        ("Wer meldet sich danach?",),
     ]
 
     for sample_dialogue in sample_dialogues:
