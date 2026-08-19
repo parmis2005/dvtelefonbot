@@ -48,6 +48,7 @@ STT_SAMPLE_RATE = 16000
 FRAME_MS = 20  # Twilio liefert/erwartet 20ms-Frames
 FRAME_SAMPLES_8K = TWILIO_SAMPLE_RATE * FRAME_MS // 1000  # 160 Samples = 160 Bytes mu-law
 VAD_FRAME_MS = 30  # webrtcvad erlaubt nur 10/20/30ms
+MIN_STT_SPEECH_MS = 120  # kurze Antworten wie "ja" duerfen nicht weggefiltert werden
 
 
 class MediaSessionState(str, enum.Enum):
@@ -80,6 +81,7 @@ class TwilioMediaStreamSession:
         greeting_audio_path: str | None = None,
         opening_text: str | None = None,
         audio_debug_dir: str | None = None,
+        require_vad_speech_for_stt: bool = True,
     ):
         self.ws = websocket
         self.dario = dario
@@ -96,6 +98,7 @@ class TwilioMediaStreamSession:
         self.greeting_audio_path = greeting_audio_path
         self.opening_text = opening_text
         self.audio_debug_dir = Path(audio_debug_dir) if audio_debug_dir else None
+        self.require_vad_speech_for_stt = require_vad_speech_for_stt
 
         # Werden ueblicherweise vom Aufrufer schon aus dem "start"-Event
         # herausgelesen uebergeben (siehe api/twilio.py), da dort auch die
@@ -119,6 +122,7 @@ class TwilioMediaStreamSession:
         self._speech_started_at: float | None = None
         self._speech_ended_at: float | None = None
         self._last_stt_finished_at: float | None = None
+        self._listen_speech_ms = 0
 
         # Vom durchgehenden Empfangs-Task befuellt, von _listen_for_utterance
         # konsumiert - entkoppelt Lesen (immer aktiv) von Verarbeiten
@@ -383,6 +387,8 @@ class TwilioMediaStreamSession:
                         self.stream_sid,
                     )
                 self._last_speech_active = is_relevant_speech
+                if is_relevant_speech:
+                    self._listen_speech_ms += VAD_FRAME_MS
 
             if self._speaking and self._barge_in_enabled:
                 playback_ms = (
@@ -638,6 +644,7 @@ class TwilioMediaStreamSession:
         self._last_speech_active = False
         self._speech_started_at = None
         self._speech_ended_at = None
+        self._listen_speech_ms = 0
         self._listening = True
         self._set_state(
             MediaSessionState.WAITING if self.dario.context.wait_mode else MediaSessionState.LISTENING
@@ -673,6 +680,16 @@ class TwilioMediaStreamSession:
                 self.stream_sid,
                 "stopped" if self._stopped.is_set() else self._last_listen_end_reason,
                 len(self._current_utterance),
+            )
+            return ""
+
+        if self.require_vad_speech_for_stt and self._listen_speech_ms < MIN_STT_SPEECH_MS:
+            logger.info(
+                "[LISTEN] finished call_id=%s streamSid=%s reason=no_vad_speech frames=%s speech_ms=%s text=none",
+                self.call_id,
+                self.stream_sid,
+                len(self._current_utterance),
+                self._listen_speech_ms,
             )
             return ""
 

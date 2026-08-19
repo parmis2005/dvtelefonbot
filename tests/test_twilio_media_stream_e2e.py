@@ -26,6 +26,7 @@ import asyncio
 import base64
 import json
 import wave
+from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -269,6 +270,7 @@ def short_utterance_timeout(monkeypatch):
 
     def patched_init(self, *args, **kwargs):
         kwargs["max_utterance_seconds"] = TEST_MAX_UTTERANCE_SECONDS
+        kwargs["require_vad_speech_for_stt"] = False
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(twilio_media_handler.TwilioMediaStreamSession, "__init__", patched_init)
@@ -285,6 +287,7 @@ async def test_twilio_session_uses_fast_turn_endpoint(
         captured["silence_timeout_ms"] = kwargs["silence_timeout_ms"]
         captured["max_utterance_seconds"] = kwargs["max_utterance_seconds"]
         kwargs["max_utterance_seconds"] = TEST_MAX_UTTERANCE_SECONDS
+        kwargs["require_vad_speech_for_stt"] = False
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(twilio_media_handler.TwilioMediaStreamSession, "__init__", patched_init)
@@ -651,6 +654,41 @@ async def test_technical_error_during_call_does_not_crash_server(
     # unbegrenzt in einem "ANSWERED"-Zustand haengen zu bleiben.
     call = await CallRepository(db_session).get(call_id)
     assert call.status.value in ("HANGUP", "COMPLETED", "FAILED")
+
+
+@pytest.mark.asyncio
+async def test_listen_window_with_only_silence_does_not_call_stt(monkeypatch):
+    class FailingSTT:
+        async def transcribe(self, audio_path: str) -> TranscriptionResult:
+            raise AssertionError("STT darf bei reiner Stille nicht aufgerufen werden")
+
+    ws = FakeTwilioWebSocket()
+    session = twilio_media_handler.TwilioMediaStreamSession(
+        websocket=ws,
+        dario=SimpleNamespace(context=SimpleNamespace(wait_mode=False)),
+        call_service=None,
+        call_id=99,
+        stt=FailingSTT(),
+        tts=None,
+        twilio_provider=None,
+        stream_sid="MZsilenceonly",
+        max_utterance_seconds=0.1,
+        require_vad_speech_for_stt=True,
+    )
+    monkeypatch.setattr(session._vad, "is_speech", lambda frame, sample_rate=16000: False)
+
+    receiver = asyncio.create_task(session._receive_loop())
+    listen = asyncio.create_task(session._listen_for_utterance())
+    await asyncio.sleep(0.01)
+    for _ in range(8):
+        ws.push(_make_media_event("MZsilenceonly"))
+
+    assert await listen == ""
+    receiver.cancel()
+    try:
+        await receiver
+    except asyncio.CancelledError:
+        pass
 
 
 async def _true() -> bool:

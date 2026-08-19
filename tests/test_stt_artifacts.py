@@ -12,6 +12,7 @@ def test_pure_hallucination_marker_becomes_empty():
     assert strip_non_speech_artifacts("[Stille]") == ""
     assert strip_non_speech_artifacts("(Schritte)") == ""
     assert strip_non_speech_artifacts("[BLANK_AUDIO]") == ""
+    assert strip_non_speech_artifacts("Untertitel im Auftrag des ZDF für funk, 2017") == ""
 
 
 def test_real_speech_is_untouched():

@@ -30,11 +30,18 @@ class WhisperBinaryNotFoundError(Exception):
 # entfernt, damit sie nicht als echte Kundenaeusserung in die Conversation
 # Engine gelangen (dort wuerden sie z.B. faelschlich als Antwort verarbeitet).
 _NON_SPEECH_ARTIFACT_RE = re.compile(r"[\[(][^\])]{0,60}[\])]")
+_NON_SPEECH_PHRASE_RE = re.compile(
+    r"^\s*(untertitel|untertitelung)\s+(im\s+auftrag|von|für|fuer)\b.*$",
+    re.IGNORECASE,
+)
 
 
 def strip_non_speech_artifacts(text: str) -> str:
     cleaned = _NON_SPEECH_ARTIFACT_RE.sub("", text)
-    return re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if _NON_SPEECH_PHRASE_RE.match(cleaned):
+        return ""
+    return cleaned
 
 
 class LocalWhisperProvider(SpeechToTextProvider):

@@ -131,6 +131,7 @@ def short_utterance_timeout(monkeypatch):
 
     def patched_init(self, *args, **kwargs):
         kwargs["max_utterance_seconds"] = TEST_MAX_UTTERANCE_SECONDS
+        kwargs["require_vad_speech_for_stt"] = False
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(twilio_media_handler.TwilioMediaStreamSession, "__init__", patched_init)
