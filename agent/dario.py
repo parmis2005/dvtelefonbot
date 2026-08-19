@@ -180,16 +180,29 @@ class Dario:
         )
 
     async def _finalize_call(self) -> None:
+        await self._persist_call_artifacts(mark_complete=True)
+        logger.info("Call beendet, Ergebnis: %s", self.context.call_result)
+
+    async def persist_partial_call(self, result: str = "UNKNOWN") -> None:
+        """Persist transcript/summary when Twilio hangs up before Dario ends.
+
+        Real users often hang up mid-conversation. The dashboard still needs
+        the spoken turns for debugging and follow-up instead of an empty call.
+        """
+        self.context.call_result = self.context.call_result or result
+        await self._persist_call_artifacts(mark_complete=False)
+
+    async def _persist_call_artifacts(self, *, mark_complete: bool) -> None:
         summary = build_summary(self.context)
         self.context.call_result = self.context.call_result or "UNKNOWN"
 
         if self.call_id is not None:
             await persist_transcript(self.session, self.call_id, self.context)
-            await self.call_service.complete(self.call_id, result=self.context.call_result)
+            if mark_complete:
+                await self.call_service.complete(self.call_id, result=self.context.call_result)
             from database.repository import CallRepository
 
             await CallRepository(self.session).update(self.call_id, summary=summary)
             await export_dashboard_state_safely(self.session, reason="call_finalized")
 
         write_transcript_file(self.call_id or 0, self.context)
-        logger.info("Call beendet, Ergebnis: %s", self.context.call_result)

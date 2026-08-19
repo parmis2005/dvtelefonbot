@@ -42,13 +42,27 @@ async def prepare_initial_response_audio(
 
     prepared: list[PreparedResponseAudio] = []
     seen_texts: set[str] = set()
-    for sample_reply in (
-        "Ja, habe ich.",
-        "Ja, ich habe kurz Zeit.",
-        "Ja, kein Problem.",
-        "Ja, worum geht es?",
-        "Worum geht es?",
-    ):
+    sample_dialogues = [
+        ("Ja, habe ich.",),
+        ("Ja, ich habe kurz Zeit.",),
+        ("Ja, kein Problem.",),
+        ("Ja, worum geht es?",),
+        ("Worum geht es?",),
+        ("Ja, worum geht es?", "Ja, gerne."),
+        ("Ja, kein Problem.", "Wir haben eine Webseite."),
+        ("Ja, kein Problem.", "Wir haben keine Webseite."),
+        ("Ja, kein Problem.", "Wir sind damit zufrieden."),
+        ("Ja, kein Problem.", "Schicken Sie mir das per E-Mail."),
+        ("Ja, kein Problem.", "Per WhatsApp bitte."),
+        ("Einen Moment bitte.",),
+        ("Ich habe gerade keine Zeit.",),
+        ("Wir haben kein Interesse.",),
+        ("Was kostet das?",),
+        ("Sind Sie eine KI?",),
+        ("Wer meldet sich danach?",),
+    ]
+
+    for sample_dialogue in sample_dialogues:
         dario = await Dario.for_lead(
             session,
             settings,
@@ -59,12 +73,13 @@ async def prepare_initial_response_audio(
             call_id,
         )
         dario.opening_line()
-        outcome = await dario.process_utterance(sample_reply)
-        text = outcome.reply_text.strip()
-        if not text or text in seen_texts:
-            continue
-        seen_texts.add(text)
-        cached = await ensure_cached_tts(tts, text, label="tts", call_id=call_id)
-        prepared.append(PreparedResponseAudio(text=text, bytes=cached.bytes))
+        for sample_reply in sample_dialogue:
+            outcome = await dario.process_utterance(sample_reply)
+            text = outcome.reply_text.strip()
+            if not text or text in seen_texts:
+                continue
+            seen_texts.add(text)
+            cached = await ensure_cached_tts(tts, text, label="tts", call_id=call_id)
+            prepared.append(PreparedResponseAudio(text=text, bytes=cached.bytes))
 
     return prepared

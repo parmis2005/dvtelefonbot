@@ -38,7 +38,36 @@ async def test_gatekeeper_topic_question_with_design():
     result = await engine.handle_utterance(ctx, "Worum geht es denn genau?")
 
     assert "Entwurf" in result.reply_text
-    assert ctx.state == CallState.GATEKEEPER
+    assert "zuschicken" in result.reply_text
+    assert ctx.state == CallState.DESIGN_OFFER
+
+
+@pytest.mark.asyncio
+async def test_opening_topic_then_yes_asks_contact_channel_without_llm():
+    engine = make_engine()
+    ctx = make_context(state=CallState.INITIAL, entwurf_vorhanden=True)
+    engine.opening_line(ctx)
+
+    topic = await engine.handle_utterance(ctx, "Ja, worum geht's?")
+    assert ctx.state == CallState.DESIGN_OFFER
+    assert "Entwurf" in topic.reply_text
+
+    confirmation = await engine.handle_utterance(ctx, "Ja, gerne.")
+    assert ctx.state == CallState.CONTACT_CAPTURE
+    assert "E-Mail" in confirmation.reply_text
+    assert "WhatsApp" in confirmation.reply_text
+
+
+@pytest.mark.asyncio
+async def test_has_website_turn_offers_design_without_unknown_fallback():
+    engine = make_engine()
+    ctx = make_context(state=CallState.DISCOVERY, entwurf_vorhanden=True)
+
+    result = await engine.handle_utterance(ctx, "Ja, wir haben eine Webseite.")
+
+    assert ctx.state == CallState.DESIGN_OFFER
+    assert "modern" in result.reply_text
+    assert "Entwurf" in result.reply_text
 
 
 @pytest.mark.asyncio

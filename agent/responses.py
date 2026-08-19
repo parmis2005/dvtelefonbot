@@ -51,11 +51,31 @@ class ResponseBank:
             return (
                 "Wir haben fuer Ihr Unternehmen bereits einen unverbindlichen "
                 "Webseiten-Entwurf vorbereitet und wuerden ihn der zustaendigen Person "
-                "gerne kurz zeigen."
+                "gerne kurz zeigen. Wer ist bei Ihnen dafuer zustaendig?"
             )
         return (
             "Wir haetten einen konkreten Vorschlag fuer Ihren Online-Auftritt und wuerden "
-            "diesen gerne kurz mit der zustaendigen Person besprechen."
+            "diesen gerne kurz mit der zustaendigen Person besprechen. Wer ist bei Ihnen "
+            "dafuer zustaendig?"
+        )
+
+    def topic_explanation_after_opening(self, lead: LeadData) -> str:
+        if can_claim_online_auftritt_geprueft(lead) and can_claim_entwurf_vorhanden(lead):
+            return (
+                "Es geht kurz um Ihren Webseiten- und Online-Auftritt. Wir haben ihn uns "
+                "angesehen und bereits einen unverbindlichen Entwurf vorbereitet. Darf ich "
+                "Ihnen den einmal zuschicken?"
+            )
+        if can_claim_entwurf_vorhanden(lead):
+            return (
+                "Es geht kurz um Ihren Webseiten- und Online-Auftritt. Wir haben bereits "
+                "einen unverbindlichen Entwurf vorbereitet, damit Sie direkt eine Richtung "
+                "sehen. Darf ich Ihnen den einmal zuschicken?"
+            )
+        return (
+            "Es geht kurz um Ihren Online-Auftritt. Wir haetten dazu einen konkreten "
+            "Vorschlag, wie dieser moderner und uebersichtlicher wirken koennte. Darf ich "
+            "Ihnen das kurz erklaeren?"
         )
 
     # --- Person nicht da (Abschnitt 15) ---
@@ -94,32 +114,29 @@ class ResponseBank:
 
     def no_website_pitch(self) -> str:
         return (
-            "Verstehe. Viele potenzielle Kunden suchen zuerst ueber Google. Eine eigene "
-            "Webseite kann Leistungen, Bilder, Kontaktdaten und Oeffnungszeiten uebersichtlich "
-            "an einem Ort zeigen."
+            "Verstehe. Viele Kunden suchen zuerst ueber Google. Eine eigene Webseite "
+            "zeigt Leistungen, Bilder und Kontaktmoeglichkeiten an einem Ort."
         )
 
     def offer_design_no_website(self, lead: LeadData) -> str | None:
         if not can_claim_entwurf_vorhanden(lead):
             return None
         return (
-            "Genau dafuer haben wir bereits einen unverbindlichen Entwurf vorbereitet. So "
-            "koennen Sie direkt sehen, wie eine Webseite fuer Ihr Unternehmen aussehen "
-            "koennte. Darf ich Ihnen den einmal zuschicken?"
+            "Genau dafuer haben wir bereits einen unverbindlichen Entwurf vorbereitet. "
+            "Darf ich Ihnen den einmal zuschicken?"
         )
 
     # --- Webseite vorhanden (Abschnitt 19) ---
 
     def existing_website_note(self) -> str:
-        return "Verstehe. Gerade auf dem Handy sollte eine Webseite modern, uebersichtlich und professionell wirken."
+        return "Verstehe. Gerade auf dem Handy sollte eine Webseite modern und uebersichtlich wirken."
 
     def offer_design_existing_website(self, lead: LeadData) -> str | None:
         if not can_claim_entwurf_vorhanden(lead):
             return None
         return (
-            "Wir haben dazu bereits einen unverbindlichen Entwurf vorbereitet. So koennen "
-            "Sie direkt sehen, wie eine modernere Variante Ihres Online-Auftritts aussehen "
-            "koennte. Darf ich Ihnen den einmal zuschicken?"
+            "Wir haben dazu bereits einen unverbindlichen Entwurf vorbereitet. Darf ich "
+            "Ihnen den einmal zuschicken?"
         )
 
     # --- Kunde zufrieden (Abschnitt 20) ---
@@ -131,9 +148,8 @@ class ResponseBank:
         if not can_claim_entwurf_vorhanden(lead):
             return None
         return (
-            "Da wir bereits einen unverbindlichen Entwurf vorbereitet haben, koennten Sie "
-            "ihn sich trotzdem einmal als zusaetzlichen Vergleich ansehen. Darf ich ihn "
-            "Ihnen zuschicken?"
+            "Da wir bereits einen unverbindlichen Entwurf vorbereitet haben, koennen Sie "
+            "ihn sich einfach als Vergleich ansehen. Darf ich ihn Ihnen zuschicken?"
         )
 
     # --- Zwei-Nein-Regel Ende (Abschnitt 21/22) ---
@@ -148,9 +164,8 @@ class ResponseBank:
         if not can_claim_entwurf_vorhanden(lead):
             return None
         return (
-            "Da wir fuer Ihr Unternehmen bereits einen unverbindlichen Entwurf vorbereitet "
-            "haben: Darf ich Ihnen den trotzdem einmal zusenden? Sie koennen ihn sich "
-            "einfach in Ruhe anschauen."
+            "Da wir bereits einen unverbindlichen Entwurf vorbereitet haben: Darf ich "
+            "Ihnen den trotzdem einmal zusenden?"
         )
 
     # --- "Wir haben schon jemanden" (Abschnitt 23) ---
@@ -234,6 +249,23 @@ class ResponseBank:
 
     def ask_contact_channel(self) -> str:
         return "Sehr gerne. Was waere Ihnen lieber: per E-Mail oder per WhatsApp?"
+
+    def ask_contact_channel_for_design(self) -> str:
+        return "Gerne. Soll ich Ihnen den Entwurf per E-Mail oder per WhatsApp zukommen lassen?"
+
+    def contact_capture_help(self) -> str:
+        return "Wie darf ich Ihnen den Entwurf am besten zusenden: per E-Mail oder per WhatsApp?"
+
+    def contextual_unknown(self, lead: LeadData) -> str:
+        if can_claim_entwurf_vorhanden(lead):
+            return (
+                "Das kann ich gerne kurz einordnen. Es geht um einen unverbindlichen "
+                "Entwurf fuer Ihren Online-Auftritt. Darf ich Ihnen den einmal zuschicken?"
+            )
+        return (
+            "Das kann ich gerne kurz einordnen. Es geht um einen konkreten Vorschlag fuer "
+            "Ihren Online-Auftritt. Darf ich Ihnen das kurz erklaeren?"
+        )
 
     def confirm_email_repeat(self, email: str) -> str:
         return f"Ich wiederhole zur Kontrolle: {email}. Ist das so richtig?"

@@ -7,10 +7,13 @@ spaeteren Telefonie-Pfad genutzt - es gibt keine separate vereinfachte Logik.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from dataclasses import dataclass, field
 
 from agent.context import ConversationContext
 from agent.guardrails import (
+    can_claim_entwurf_vorhanden,
     can_offer_design,
     is_valid_email,
     is_valid_phone,
@@ -153,6 +156,14 @@ class ConversationEngine:
 
         # Gatekeeper
         if nlu.has(Intent.GATEKEEPER_ASK_TOPIC):
+            if context.state == CallState.INTRODUCTION:
+                context.transition_to(CallState.DISCOVERY)
+                if can_claim_entwurf_vorhanden(context.lead):
+                    context.design_offered = True
+                    context.transition_to(CallState.DESIGN_OFFER)
+                else:
+                    context.transition_to(CallState.PITCH)
+                return EngineResult(reply_text=r.topic_explanation_after_opening(context.lead))
             context.transition_to(CallState.GATEKEEPER)
             return EngineResult(reply_text=r.gatekeeper_explain_topic(context.lead))
 
@@ -197,6 +208,18 @@ class ConversationEngine:
                 context.design_offered = True
                 context.transition_to(CallState.DESIGN_OFFER)
                 text = f"{text} {offer}"
+            return EngineResult(reply_text=text)
+
+        if nlu.has(Intent.HAS_WEBSITE):
+            context.transition_to(CallState.DISCOVERY)
+            text = r.existing_website_note()
+            offer = r.offer_design_existing_website(context.lead)
+            if offer and can_offer_design(context, self.max_rejections):
+                context.design_offered = True
+                context.transition_to(CallState.DESIGN_OFFER)
+                text = f"{text} {offer}"
+            else:
+                text = f"{text} {r.ask_current_website_satisfaction()}"
             return EngineResult(reply_text=text)
 
         if nlu.has(Intent.HAS_WEBSITE_SATISFIED):
@@ -260,7 +283,12 @@ class ConversationEngine:
         if nlu.has(Intent.AFFIRMATION):
             if context.state == CallState.DESIGN_OFFER:
                 context.transition_to(CallState.CONTACT_CAPTURE)
-                return EngineResult(reply_text=r.ask_contact_channel())
+                return EngineResult(reply_text=r.ask_contact_channel_for_design())
+            if context.state == CallState.GATEKEEPER:
+                context.transition_to(CallState.DISCOVERY)
+                return EngineResult(
+                    reply_text=f"{r.website_check_intro(context.lead)} {r.ask_current_website_satisfaction()}"
+                )
             if context.state in (CallState.PITCH, CallState.DISCOVERY):
                 context.transition_to(CallState.DESIGN_OFFER)
                 context.design_offered = True
@@ -291,11 +319,50 @@ class ConversationEngine:
                 from agent.guardrails import strip_disallowed_audio_artifacts
 
                 messages = build_messages(context, context.history[-1].text if context.history else "")
-                text = await self.llm_provider.generate(messages)
-                text = strip_disallowed_audio_artifacts(text)
+                timeout = min(float(self.settings.llama_timeout), 2.5)
+                text = await asyncio.wait_for(
+                    self.llm_provider.generate(messages, max_tokens=80, temperature=0.35),
+                    timeout=timeout,
+                )
+                text = self._compact_voice_reply(strip_disallowed_audio_artifacts(text))
                 if text:
                     return EngineResult(reply_text=text)
-            except LLMUnavailableError:
+            except (LLMUnavailableError, TimeoutError):
                 logger.info("LLM nicht verfuegbar, nutze Template-Fallback")
 
-        return EngineResult(reply_text=FALLBACK_UNKNOWN)
+        return EngineResult(reply_text=self._contextual_fallback(context) or FALLBACK_UNKNOWN)
+
+    def _contextual_fallback(self, context: ConversationContext) -> str:
+        r = self.responses
+        if context.state in (CallState.INTRODUCTION, CallState.PITCH):
+            return r.topic_explanation_after_opening(context.lead)
+        if context.state == CallState.DESIGN_OFFER:
+            return r.ask_contact_channel_for_design()
+        if context.state == CallState.CONTACT_CAPTURE:
+            return r.contact_capture_help()
+        if context.state == CallState.DISCOVERY:
+            return r.contextual_unknown(context.lead)
+        if context.state == CallState.CALLBACK_REQUEST:
+            return r.ask_callback_time()
+        return ""
+
+    @staticmethod
+    def _compact_voice_reply(text: str, max_chars: int = 260) -> str:
+        """Keep live voice replies short enough that local TTS does not stall."""
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if len(cleaned) <= max_chars:
+            return cleaned
+        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+        kept: list[str] = []
+        total = 0
+        for sentence in sentences:
+            if not sentence:
+                continue
+            next_total = total + len(sentence) + (1 if kept else 0)
+            if kept and next_total > max_chars:
+                break
+            kept.append(sentence)
+            total = next_total
+            if len(kept) >= 2:
+                break
+        return " ".join(kept).strip() or cleaned[:max_chars].rsplit(" ", 1)[0].strip()

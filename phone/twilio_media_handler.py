@@ -749,4 +749,5 @@ class TwilioMediaStreamSession:
     async def _on_session_end(self) -> None:
         if self.dario.call_active:
             # Verbindung brach ab, bevor Dario das Gespraech regulaer beendet hat
+            await self.dario.persist_partial_call(result="UNKNOWN")
             await self.call_service.hangup(self.call_id, result="UNKNOWN")

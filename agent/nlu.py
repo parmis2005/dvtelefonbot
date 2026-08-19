@@ -29,6 +29,7 @@ class Intent(str, Enum):
     ALREADY_HAVE_PROVIDER = "ALREADY_HAVE_PROVIDER"
     NO_WEBSITE_NEEDED = "NO_WEBSITE_NEEDED"
     HAS_WEBSITE_SATISFIED = "HAS_WEBSITE_SATISFIED"
+    HAS_WEBSITE = "HAS_WEBSITE"
     NO_WEBSITE = "NO_WEBSITE"
     ASK_IF_AI = "ASK_IF_AI"
     ASK_WHO_WILL_CALL = "ASK_WHO_WILL_CALL"
@@ -73,11 +74,17 @@ _REJECTION_PATTERNS = [
 
 _AFFIRMATION_PATTERNS = [
     r"^\s*ja\b",
+    r"^\s*ok(ay)?\b",
     r"\bgerne\b",
     r"\bja,?\s*bitte\b",
     r"\bklingt\s+gut\b",
     r"\bsehr\s+gerne\b",
     r"\beinverstanden\b",
+    r"\bdas\s+passt\s+so\b",
+    r"\bschick(en)?\s+sie\b",
+    r"\bzusenden\b",
+    r"\bsenden\s+sie\b",
+    r"\bzeigen\s+sie\b",
 ]
 
 _WAIT_PATTERNS = [
@@ -105,7 +112,14 @@ _FRIENDLY_WISH_PATTERNS = [
     r"noch\s+einen\s+sch(ö|oe)nen\b",
 ]
 
-_GATEKEEPER_TOPIC_PATTERNS = [r"worum\s+geht\s+es", r"worum\s+geht'?s", r"was\s+m(ö|oe)chten\s+sie"]
+_GATEKEEPER_TOPIC_PATTERNS = [
+    r"worum\s+geht\s+es",
+    r"worum\s+geht'?s",
+    r"um\s+was\s+geht\s+es",
+    r"was\s+genau\b",
+    r"was\s+m(ö|oe)chten\s+sie",
+    r"erz(ä|ae)hlen\s+sie\s+(mal|kurz)",
+]
 _PERSON_NOT_AVAILABLE_PATTERNS = [
     r"(ist|sind)\s+(heute\s+)?nicht\s+da\b",
     r"nicht\s+im\s+haus\b",
@@ -129,6 +143,12 @@ _NO_WEBSITE_PATTERNS = [
     r"haben\s+keine\s+webseite\b",
     r"nur\s+(instagram|facebook|social\s+media)\b",
     r"noch\s+keine\s+webseite\b",
+]
+_HAS_WEBSITE_PATTERNS = [
+    r"haben\s+(eine|ne)\s+(webseite|homepage|website)\b",
+    r"wir\s+haben\s+(eine|ne)\s+(webseite|homepage|website)\b",
+    r"(webseite|homepage|website)\s+haben\s+wir\b",
+    r"\bja,?\s+haben\s+wir\b",
 ]
 _HAS_WEBSITE_SATISFIED_PATTERNS = [
     r"\bzufrieden\b",
@@ -214,6 +234,7 @@ def analyze(text: str) -> NluResult:
         (Intent.ALREADY_HAVE_PROVIDER, _ALREADY_HAVE_PATTERNS),
         (Intent.NO_WEBSITE_NEEDED, _NO_WEBSITE_NEEDED_PATTERNS),
         (Intent.NO_WEBSITE, _NO_WEBSITE_PATTERNS),
+        (Intent.HAS_WEBSITE, _HAS_WEBSITE_PATTERNS),
         (Intent.HAS_WEBSITE_SATISFIED, _HAS_WEBSITE_SATISFIED_PATTERNS),
         (Intent.ASK_IF_AI, _ASK_IF_AI_PATTERNS),
         (Intent.ASK_WHO_WILL_CALL, _ASK_WHO_WILL_CALL_PATTERNS),
